@@ -361,6 +361,28 @@ class NameSourceTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
+    def test_pyproject_version_matches_source(self):
+        """pyproject 与 version.py 必须同版本：发版时最容易只改一处。"""
+        import tomllib
+
+        import version
+
+        data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(
+            data["project"]["version"],
+            version.__version__,
+            "pyproject.toml 与 src/version.py 版本号不一致",
+        )
+
+    def test_py_modules_cover_every_src_file(self):
+        """py-modules 漏项会让 pip install 后 ImportError（曾漏掉 db/pinyin）。"""
+        import tomllib
+
+        data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        listed = set(data["tool"]["setuptools"]["py-modules"])
+        actual = {p.stem for p in (ROOT / "src").glob("*.py")}
+        self.assertEqual(actual - listed, set(), "src 下有模块未列入 py-modules")
+
     def test_plan_from_config_matches_build_plan(self):
         from mapping import plan_from_config, build_plan, load_names
 

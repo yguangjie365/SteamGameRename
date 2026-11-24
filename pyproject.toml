@@ -1,8 +1,9 @@
 [project]
 name = "steam-cn-renamer"
-version = "0.4.2"
+version = "0.5.1"
 description = "将 Steam 库游戏名称改为中文的本地工具（appinfo v42）"
 requires-python = ">=3.11"
+license = { text = "MIT" }
 dependencies = [
   "typer>=0.12",
   "rich>=13",
@@ -26,14 +27,17 @@ build-backend = "setuptools.build_meta"
 # 扁平布局：src 下直接是顶层模块（无包名嵌套）
 [tool.setuptools]
 package-dir = { "" = "src" }
+license-files = ["LICENSE"]
 py-modules = [
   "backup",
   "cli",
   "community",
+  "db",
   "game_names",
   "gui",
   "mapping",
   "paths",
+  "pinyin",
   "rules",
   "shard",
   "store",
