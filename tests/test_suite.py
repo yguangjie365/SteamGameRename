@@ -1414,13 +1414,13 @@ class SteamOriginalNameTests(unittest.TestCase):
 
 class LauncherTests(unittest.TestCase):
     def test_library_folder_is_not_a_steam_root(self):
-        import run
+        import steam_locator
 
         with tempfile.TemporaryDirectory() as tmp:
             lib = Path(tmp) / "SteamLibrary"
             (lib / "steamapps").mkdir(parents=True)
-            self.assertFalse(run.is_steam_dir(lib))
-            self.assertTrue(run.looks_like_library(lib))
+            self.assertFalse(steam_locator.is_steam_dir(lib))
+            self.assertTrue(steam_locator.looks_like_library(lib))
 
 
 class PinyinSortasTests(unittest.TestCase):
@@ -2048,6 +2048,7 @@ class ShutdownEndpointTests(unittest.TestCase):
                 self.assertTrue(payload["desktop"])
                 self.assertTrue(fired.wait(3), "桌面版必须收到退出回调")
             finally:
+                server.shutdown()
                 server.server_close()
 
     def test_browser_mode_reports_no_desktop(self):
@@ -2061,6 +2062,7 @@ class ShutdownEndpointTests(unittest.TestCase):
                 self.assertFalse(payload["desktop"])
                 self.assertIn("服务已停止", payload["message"])
             finally:
+                server.shutdown()
                 server.server_close()
 
 

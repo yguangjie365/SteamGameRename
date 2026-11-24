@@ -16,11 +16,25 @@ if not defined PYCMD (
   exit /b 1
 )
 
-%PYCMD% -X utf8 "%~dp0run.py" %*
+%PYCMD% -X utf8 -c "import webview, pystray, PIL" >nul 2>&1
+if errorlevel 1 (
+  echo [i] Desktop dependencies are missing. Installing...
+  %PYCMD% -m pip install pywebview pystray Pillow
+  if errorlevel 1 (
+    echo.
+    echo [!] Automatic install failed. Please run this manually, then retry:
+    echo     %PYCMD% -m pip install pywebview pystray Pillow
+    echo.
+    pause
+    exit /b 1
+  )
+)
+
+%PYCMD% -X utf8 "%~dp0run_desktop.py" %*
 set "CODE=%ERRORLEVEL%"
 if not "%CODE%"=="0" (
   echo.
-  echo [!] Launcher exited with code %CODE%.
+  echo [!] SteamGameRename exited with code %CODE%.
   pause
 )
 exit /b %CODE%

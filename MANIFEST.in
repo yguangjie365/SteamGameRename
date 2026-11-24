@@ -1,8 +1,12 @@
 include pyproject.toml
+include README.md
+include LICENSE
 include 使用说明.md
-include run.py
 include run_desktop.py
-include "启动桌面版.bat"
+include steam_locator.py
+include "SteamGameRename.bat"
+include "创建桌面快捷方式.bat"
+include "安装依赖.bat"
 recursive-include src *.py
 recursive-include src/web *.html
 recursive-include src/defaults *.json *.csv

@@ -42,13 +42,11 @@ git clone https://github.com/yguangjie365/SteamGameRename.git
 cd SteamGameRename
 ```
 
-**桌面版（推荐）**
+**启动**
 
-双击 `启动桌面版.bat`。首次会自动安装 `pywebview / pystray / Pillow`；装不上会提示并退回浏览器模式。
+双击 **`SteamGameRename.bat`**。首次运行会自动安装 `pywebview / pystray / Pillow`，装不上会提示手动安装命令。
 
-**浏览器版**
-
-双击 `SteamGameRename.bat`，自动打开浏览器界面。
+界面是独立窗口，关闭只是收进托盘；Steam 退出后会自动补写被覆盖的汉化。
 
 **命令行**
 
@@ -75,8 +73,8 @@ python src/cli.py sync --execute    # 补回被 Steam 覆盖的汉化
 ## 项目结构
 
 ```
-run.py              浏览器模式启动器：定位 Steam、选端口
-run_desktop.py      桌面壳：pywebview 窗口 + 托盘 + 退出后补写
+run_desktop.py      程序入口：pywebview 窗口 + 托盘 + Steam 退出后自动补写
+steam_locator.py    Steam 安装目录探测（参数/环境变量/注册表/常见路径/全盘扫描）
 src/
   vdf.py            二进制 VDF 编解码
   shard.py          appinfo 分片读写与校验

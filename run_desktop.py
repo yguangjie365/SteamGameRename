@@ -32,6 +32,23 @@ for entry in (str(ROOT), str(SRC)):
         sys.path.insert(0, entry)
 
 DEFAULT_GUARD_INTERVAL = 30.0
+# 单实例锁端口：只 bind 不监听业务，进程退出后由系统释放。
+# 两个实例会各起一个守护线程去补写，进程内的锁拦不住，必须跨进程。
+INSTANCE_LOCK_PORT = 17650
+
+
+def acquire_instance_lock() -> "object | None":
+    """Bind the lock port; None means another instance (or a squatter) holds it."""
+    import socket
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", INSTANCE_LOCK_PORT))
+        sock.listen(1)
+    except OSError:
+        sock.close()
+        return None
+    return sock
 
 
 def missing_desktop_deps() -> str | None:
@@ -183,20 +200,34 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--no-guard", action="store_true", help="关闭自动补写守护")
     parser.add_argument("--no-tray", action="store_true", help="不创建托盘，关闭窗口即退出")
+    parser.add_argument(
+        "--force-new", action="store_true",
+        help="跳过单实例检测（确认没有其它实例时使用）",
+    )
     parser.add_argument("--check", action="store_true", help="只校验依赖与环境后退出")
     args = parser.parse_args(argv)
 
-    import run as launcher
+    import steam_locator as locator
 
     missing = missing_desktop_deps()
     if missing:
         print(f"[!] 桌面依赖缺失（{missing}）")
         print("    安装：pip install pywebview pystray Pillow")
-        print("    已回退到浏览器模式。")
-        return launcher.main([])
+        print("    安装后重新运行本程序。")
+        return 1
 
-    settings = launcher.load_settings()
-    steam_dir, source = launcher.detect_steam_dir(args.steam_dir, settings)
+    # 单实例：两个进程各有一个守护线程，进程内锁拦不住并发写分片
+    instance_lock = None
+    if not args.check and not args.force_new:
+        instance_lock = acquire_instance_lock()
+        if instance_lock is None:
+            print("[i] SteamGameRename 已在运行（看右下角托盘里的蓝色 S 图标）。")
+            print(f"    若确认没有实例，可能是端口 {INSTANCE_LOCK_PORT} 被占用，")
+            print("    可加 --force-new 跳过检测。")
+            return 0
+
+    settings = locator.load_settings()
+    steam_dir, source = locator.detect_steam_dir(args.steam_dir, settings)
     if steam_dir is None:
         print("[!] 未找到 Steam 安装目录，请用 --steam-dir 指定")
         return 1
@@ -315,9 +346,9 @@ def main(argv: list[str] | None = None) -> int:
         webview.start()
     except Exception as exc:  # noqa: BLE001
         print(f"[!] 无法创建窗口（{exc}）")
-        print(f"    已回退到浏览器模式：{url}")
+        print(f"    服务地址：{url}")
         shutdown()
-        return launcher.main([])
+        return 1
     finally:
         shutdown()
     return 0
