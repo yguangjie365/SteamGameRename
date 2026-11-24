@@ -1,0 +1,33 @@
+# ---- 用户数据：绝不入库 ----
+# 只排除仓库根目录的运行时目录。注意必须带前导斜杠：
+# 裸写 "config/" 会匹配 tests/fixtures/config/，把测试 fixture 一起排掉。
+/config/
+/backups/
+/launcher.json
+*.db
+*.db-wal
+*.db-shm
+
+# ---- 构建产物 ----
+/dist/
+*.zip
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+.pytest_cache/
+.venv/
+venv/
+
+# ---- 内部文档 ----
+# 审查报告含本机 Steam 路径与库规模统计，属于内部资料
+docs/审查报告-*.md
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+desktop.ini

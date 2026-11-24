@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "meta": {
+    "title": "测试用台账（固定内容，勿用于真实 Steam）",
+    "description": "供 tests/test_suite.py 的快照测试使用，覆盖 manual_override / 已批准 / 本地中文 / 社区 / 无中文 五类分支。"
+  },
+  "defaults": {
+    "review_required": true,
+    "primary_target": "common.name",
+    "sync_existing_localized": [
+      "schinese",
+      "sc_schinese"
+    ],
+    "mapping_priority": [
+      "user_override",
+      "local_schinese",
+      "local_sc_schinese",
+      "common_name",
+      "community",
+      "store_api"
+    ]
+  },
+  "summary": {},
+  "entries": {
+    "443510": {
+      "appid": 443510,
+      "shard": "appinfo_17.vdf",
+      "original_name": "Guide Button Chord",
+      "base_name": "指南按钮和弦",
+      "desired_name": "指南按钮和弦",
+      "targets": [
+        "common.name"
+      ],
+      "source": "user_override",
+      "status": "approved",
+      "approved": true,
+      "manual_override": true
+    },
+    "651430": {
+      "appid": 651430,
+      "shard": "appinfo_00.vdf",
+      "original_name": "TEKKEN 7 - TAIKO NO TATSUJIN Pack",
+      "base_name": "铁拳7 - 太鼓达人包",
+      "desired_name": "铁拳7 - 太鼓达人包",
+      "targets": [
+        "common.name"
+      ],
+      "source": "community",
+      "status": "approved",
+      "approved": true,
+      "manual_override": false
+    },
+    "4628710": {
+      "appid": 4628710,
+      "shard": "appinfo_00.vdf",
+      "original_name": "Proton 11.0",
+      "note": "Proton 运行时不改名",
+      "targets": [
+        "common.name"
+      ],
+      "approved": false,
+      "manual_override": false
+    }
+  }
+}

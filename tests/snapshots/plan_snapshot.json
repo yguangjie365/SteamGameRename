@@ -1,0 +1,11 @@
+{
+  "total": 5,
+  "status": {
+    "approved": 2,
+    "candidate": 1,
+    "no_zh": 2
+  },
+  "approved": 2,
+  "applied": 0,
+  "digest": "sha256:c9a09715ebb8b12e0bc6f5599113d4cca830ba42bd5a858ca720c49d3f3f1b4f"
+}

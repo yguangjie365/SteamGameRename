@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "meta": {
+    "title": "Steam 中文名规范化规则",
+    "description": "规则只作用于已经确定为中文的候选名称；纯英文名必须先完成译名映射，再执行规则。默认所有规则只生成候选，需用户批准后写入文件。",
+    "updated_at": "2026-11-23T11:06:00+08:00"
+  },
+  "execution": {
+    "order": [
+      "R1_strip_latin_tail",
+      "R2_punctuation_fullwidth",
+      "R3_whitespace",
+      "R4_strip_trademark",
+      "R5_cjk_latin_spacing",
+      "R6_strip_book_title_marks"
+    ],
+    "default_mode": "review",
+    "modes": {
+      "review": "只生成候选，等待用户批准",
+      "auto": "自动应用，但仍写入 names.json 留痕"
+    }
+  },
+  "rules": {
+    "R1_strip_latin_tail": {
+      "enabled": true,
+      "mode": "review",
+      "category": "mixed_latin",
+      "title": "去除中文主体后的英文残留",
+      "description": "当名称以中文主体开头、后面跟着空格+英文或括号英文时，删除尾部英文部分。要求中文主体至少包含 2 个汉字，且原名称本身不是纯英文名。",
+      "preconditions": {
+        "contains_cjk": true,
+        "min_cjk_chars": 2,
+        "skip_if_no_cjk": true
+      },
+      "operations": [
+        {
+          "pattern": "^(?P<zh>.*[\\u4e00-\\u9fff])\\s*(?:[（(][A-Za-z][^)）]*[)）]|[A-Za-z][A-Za-z0-9'’&.\\- ]*)$",
+          "replacement": "\\g<zh>",
+          "flags": []
+        }
+      ],
+      "guardrails": [
+        "不处理纯英文名称",
+        "中文主体少于 2 个汉字时跳过",
+        "删除结果为空时跳过"
+      ],
+      "examples": [
+        {"before": "暖雪 Warm Snow", "after": "暖雪"},
+        {"before": "土豆兄弟(Brotato)", "after": "土豆兄弟"},
+        {"before": "古剑奇谭三(Gujian3)", "after": "古剑奇谭三"},
+        {"before": "异形丛生：虫启天降 (Alien Swarm: Reactive Drop)", "after": "异形丛生：虫启天降"},
+        {"before": "仁王 Complete Edition", "after": "仁王"}
+      ]
+    },
+    "R2_punctuation_fullwidth": {
+      "enabled": true,
+      "mode": "review",
+      "category": "punctuation",
+      "title": "半角标点转全角并统一间隔号",
+      "description": "汉字相邻的半角冒号、逗号、叹号、问号转为全角；包含中文的半角括号转为全角括号；多种间隔号统一为 U+00B7 中点。",
+      "preconditions": {
+        "contains_cjk": true
+      },
+      "operations": [
+        {"pattern": "(?<=[\\u4e00-\\u9fff]):", "replacement": "：", "flags": []},
+        {"pattern": ":(?=[\\u4e00-\\u9fff])", "replacement": "：", "flags": []},
+        {"pattern": "(?<=[\\u4e00-\\u9fff]),", "replacement": "，", "flags": []},
+        {"pattern": "(?<=[\\u4e00-\\u9fff])!", "replacement": "！", "flags": []},
+        {"pattern": "(?<=[\\u4e00-\\u9fff])\\?", "replacement": "？", "flags": []},
+        {"pattern": "\\(([^)]*[\\u4e00-\\u9fff][^)]*)\\)", "replacement": "（\\1）", "flags": []},
+        {"pattern": "[・•]", "replacement": "·", "flags": []}
+      ],
+      "guardrails": [
+        "不修改英文语句内部的半角标点",
+        "只处理紧邻汉字的半角标点"
+      ],
+      "examples": [
+        {"before": "异形丛生:虫启天降", "after": "异形丛生：虫启天降"},
+        {"before": "古剑奇谭三(Gujian3)", "after": "古剑奇谭三（Gujian3）"}
+      ]
+    },
+    "R3_whitespace": {
+      "enabled": true,
+      "mode": "review",
+      "category": "whitespace",
+      "title": "清理首尾空格与连续空白",
+      "description": "删除名称首尾空白，把连续空格或制表符压缩为一个半角空格，全角空格转为半角空格。",
+      "preconditions": {},
+      "operations": [
+        {"pattern": "^\\s+|\\s+$", "replacement": "", "flags": []},
+        {"pattern": "[ \\t\\u3000]{2,}", "replacement": " ", "flags": []},
+        {"pattern": "\\u3000", "replacement": " ", "flags": []}
+      ],
+      "guardrails": [
+        "不删除名称内部必要的单个空格"
+      ],
+      "examples": [
+        {"before": " 霍格沃茨之遗：黑魔法驻军帽", "after": "霍格沃茨之遗：黑魔法驻军帽"},
+        {"before": "古剑奇谭  三", "after": "古剑奇谭 三"}
+      ]
+    },
+    "R4_strip_trademark": {
+      "enabled": true,
+      "mode": "review",
+      "category": "symbol",
+      "title": "移除商标符号",
+      "description": "移除中文名称中的 ™ 与 ® 符号。可通过 enabled 关闭以保留官方写法。",
+      "preconditions": {
+        "contains_cjk": true
+      },
+      "operations": [
+        {"pattern": "[™®]", "replacement": "", "flags": []}
+      ],
+      "guardrails": [
+        "只处理中文名称，不处理纯英文名称",
+        "关闭本规则即可完整保留官方商标写法"
+      ],
+      "examples": [
+        {"before": "使命召唤®：战争地带™", "after": "使命召唤：战争地带"},
+        {"before": "《暗黑破坏神® IV：憎恨之躯™》", "after": "《暗黑破坏神 IV：憎恨之躯》"}
+      ]
+    },
+    "R5_cjk_latin_spacing": {
+      "enabled": true,
+      "mode": "review",
+      "category": "spacing",
+      "title": "统一汉字与拉丁字符间距",
+      "description": "在汉字与英文字母/数字直接相邻时插入一个半角空格；已有空格时不改动。",
+      "preconditions": {
+        "contains_cjk": true
+      },
+      "operations": [
+        {"pattern": "(?<=[\\u4e00-\\u9fff])(?=[A-Za-z0-9])", "replacement": " ", "flags": []},
+        {"pattern": "(?<=[A-Za-z0-9])(?=[\\u4e00-\\u9fff])", "replacement": " ", "flags": []}
+      ],
+      "guardrails": [
+        "已有空格时不重复插入",
+        "全角标点两侧不插入空格"
+      ],
+      "examples": [
+        {"before": "暗黑破坏神IV", "after": "暗黑破坏神 IV"},
+        {"before": "IV憎恨之躯", "after": "IV 憎恨之躯"}
+      ]
+    },
+    "R6_strip_book_title_marks": {
+      "enabled": true,
+      "mode": "review",
+      "category": "symbol",
+      "title": "移除书名号",
+      "description": "移除名称中成对出现的中文书名号《》，保留其中内容。不改变引号、括号或其他符号。",
+      "preconditions": {
+        "contains_cjk": true
+      },
+      "operations": [
+        {"pattern": "《([^》]*)》", "replacement": "\\1", "flags": []}
+      ],
+      "guardrails": [
+        "只处理成对书名号，落单的《或》保持原样",
+        "不处理英文书名号或其他引号"
+      ],
+      "examples": [
+        {"before": "《守望先锋》", "after": "守望先锋"},
+        {"before": "《暗黑破坏神 IV：憎恨之躯》", "after": "暗黑破坏神 IV：憎恨之躯"},
+        {"before": "《暗黑破坏神 IV》：“憎恨之王” - 标准版", "after": "暗黑破坏神 IV：“憎恨之王” - 标准版"}
+      ]
+    }
+  }
+}

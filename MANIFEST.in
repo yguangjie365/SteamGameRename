@@ -1,0 +1,9 @@
+include pyproject.toml
+include 使用说明.md
+include run.py
+include run_desktop.py
+include "启动桌面版.bat"
+recursive-include src *.py
+recursive-include src/web *.html
+recursive-include src/defaults *.json *.csv
+recursive-include config *.json *.txt

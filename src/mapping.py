@@ -1,0 +1,775 @@
+"""Name planning: merge shard data, names.json and normalization rules."""
+from __future__ import annotations
+
+import json
+import re
+import threading
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from pydantic import BaseModel, Field, ValidationError
+
+import db as dbmod
+from backup import atomic_write
+from community import (  # noqa: F401  (re-exported for CLI/GUI/tests)
+    COMMUNITY_NAMES_URL,
+    _read_community_csv,
+    load_community_names,
+    update_community_names,
+)
+from game_names import (
+    LEARNED_CSV_NAME, ORIGINAL_CSV_NAME, SharedNames, load_original_names,
+    load_shared_names, merge_original_names, names_match,
+    write_learned_originals,
+)
+from paths import asset_dir
+from pinyin import sortas_for
+from rules import CJK, RuleSet, apply_rules, load_rules
+from shard import AppEntry, Shard, ShardError, app_names, parse_file, target_path
+from store import fetch_store_names, load_store_cache  # noqa: F401
+from vdf import find_string, get_node, node_text, resolve, spacing_warning
+
+TYPE_LABELS = {
+    "game": "游戏",
+    "music": "原声音轨",
+    "application": "软件",
+    "tool": "工具",
+    "other": "其他",
+}
+
+KNOWN_PRIORITIES = {
+    "user_override", "local_schinese", "local_sc_schinese",
+    "common_name", "shared_csv", "community", "store_api",
+}
+
+# 只有名称字段允许写入；写进 common.icon 之类会静默破坏 appinfo 元数据
+_LANG_SUFFIX = re.compile(r"[a-z_]{2,20}")
+TARGET_HINT = "只允许 common.name、common.sortas 或 name_localized.<语言>"
+
+
+def is_allowed_target(target: str) -> bool:
+    if not isinstance(target, str):
+        return False
+    if target in ("common.name", "common.sortas"):
+        return True
+    if target.startswith("name_localized."):
+        return bool(_LANG_SUFFIX.fullmatch(target.split(".", 1)[1]))
+    return False
+
+
+def classify_app(shard: Shard, entry: AppEntry) -> tuple[str, str]:
+    """Return (normalized category, raw common.type)."""
+    common = get_node(shard.codec, entry.root, ["common"])
+    raw = node_text(shard.codec, find_string(shard.codec, common, "type")) if common else ""
+    key = raw.strip().lower()
+    if key in ("game", "music", "application", "tool"):
+        return key, raw
+    return "other", raw
+
+
+class NameEntrySpec(BaseModel):
+    appid: int | None = None
+    shard: str | None = None
+    original_name: str | None = None
+    original_localized: dict = Field(default_factory=dict)
+    base_name: str | None = None
+    desired_name: str | None = None
+    applied_rules: list[str] = Field(default_factory=list)
+    source: str | None = None
+    targets: list[str] | None = None
+    status: str | None = None
+    approved: bool = False
+    manual_override: bool = False
+    note: str = ""
+
+
+class NamesSpec(BaseModel):
+    schema_version: int
+    meta: dict = Field(default_factory=dict)
+    defaults: dict = Field(default_factory=dict)
+    summary: dict = Field(default_factory=dict)
+    entries: dict[str, NameEntrySpec] = Field(default_factory=dict)
+
+
+@dataclass
+class PlanEntry:
+    appid: int
+    shard: str
+    original_name: str
+    # 台账首次记录的游戏原名。Steam 文件被改写后 original_name 变成中文，
+    # 这个字段保留最初英文名，仅供展示/搜索，不参与写入与审批判定。
+    steam_original_name: str = ""
+    localized: dict[str, str] = field(default_factory=dict)
+    base_name: str = ""
+    desired_name: str = ""
+    applied_rules: list[str] = field(default_factory=list)
+    source: str = ""
+    targets: list[str] = field(default_factory=list)
+    status: str = "candidate"
+    approved: bool = False
+    manual_override: bool = False
+    note: str = ""
+    app_type: str = "other"
+    type_raw: str = ""
+    applied: bool = False
+    in_file: bool = False
+    # 只读派生提示，不写回台账、不参与审批与写入判定
+    warnings: list[str] = field(default_factory=list)
+    # 可选的库排序键（common.sortas 拼音首字母）；为空表示不写入该字段
+    sortas: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "appid": self.appid,
+            "app_type": self.app_type,
+            "type_raw": self.type_raw,
+            "shard": self.shard,
+            "original_name": self.original_name,
+            "steam_original_name": self.steam_original_name,
+            "original_localized": self.localized,
+            "base_name": self.base_name,
+            "applied_rules": self.applied_rules,
+            "desired_name": self.desired_name,
+            "source": self.source,
+            "targets": self.targets,
+            "status": self.status,
+            "approved": self.approved,
+            "manual_override": self.manual_override,
+            "note": self.note,
+            "applied": self.applied,
+            "in_file": self.in_file,
+            "warnings": list(self.warnings),
+            "sortas": self.sortas,
+        }
+
+
+def _validate_ledger(data: dict, label: str) -> dict:
+    """Validate and normalize ledger data; shared by JSON and SQLite paths."""
+    try:
+        validated = NamesSpec.model_validate(data)
+    except ValidationError as exc:
+        raise ValueError(f"{label} 校验失败: {exc}") from exc
+    if validated.schema_version != 1:
+        raise ValueError("unsupported names schema_version")
+    for key, entry in validated.entries.items():
+        if not key.isdigit():
+            raise ValueError(f"{label}: entries key 非数字: {key!r}")
+        if entry.appid is not None and int(entry.appid) != int(key):
+            raise ValueError(
+                f"{label}: entries[{key}].appid={entry.appid} 与 key 不一致"
+            )
+        bad = [t for t in (entry.targets or []) if not is_allowed_target(t)]
+        if bad:
+            raise ValueError(
+                f"{label}: entries[{key}] 含非法写入目标 {bad}（{TARGET_HINT}）"
+            )
+
+    # 返回 pydantic 归一化后的数据：原始 dict 会让 "approved": "false" 这种
+    # 宽松强制的值在下游被当成真值。用户自定义字段原样保留。
+    normalized = validated.model_dump(exclude_none=True)
+    raw_entries = data.get("entries") or {}
+    for key, entry in normalized.get("entries", {}).items():
+        extra = {
+            name: value
+            for name, value in (raw_entries.get(key) or {}).items()
+            if name not in entry
+        }
+        if extra:
+            entry.update(extra)
+    return normalized
+
+
+def load_names(path: str | Path) -> dict:
+    """Read the ledger: JSON first, SQLite as disaster recovery.
+
+    Measured on 803/3000/8000 entries, JSON is faster at *every* size
+    (7.2/26.5/80.3 ms vs 15.5/45.6/117.7 ms) because the ledger is always
+    loaded in full — sqlite3 has to build every row as Python objects, while
+    json.loads is C. The db still receives every save, so deleting or corrupting
+    names.json degrades to "recover from db" instead of "lose the ledger".
+
+    A ledger that parses as JSON but fails validation must NOT silently fall back
+    to the db: that would make a user's hand-edit look like it never happened.
+    """
+    source = Path(path)
+    db_file = dbmod.db_path(source.parent)
+    try:
+        text = source.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        if db_file.exists():
+            recovered = _read_ledger_from_db(db_file)
+            if recovered is not None:
+                return recovered
+        raise FileNotFoundError(
+            f"找不到台账文件 {source}；请确认 --config-dir 指向包含 names.json 的目录"
+        ) from exc
+    except OSError as exc:
+        raise FileNotFoundError(f"无法读取台账 {source}: {exc}") from exc
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # 文件损坏 → 用库里的副本救回来，别让玩家丢掉所有已批准译名
+        if db_file.exists():
+            recovered = _read_ledger_from_db(db_file)
+            if recovered is not None:
+                return recovered
+        raise
+    return _validate_ledger(data, "names.json")
+
+
+def _read_ledger_from_db(db_file: Path) -> dict | None:
+    conn = dbmod.connect(db_file)
+    try:
+        data = dbmod.read_ledger(conn)
+    finally:
+        conn.close()
+    if not (data.get("entries") or data.get("defaults")):
+        return None
+    return _validate_ledger(data, str(db_file))
+
+
+def save_names(data: dict, path: str | Path) -> None:
+    """Write the ledger to SQLite (if present) and refresh the JSON mirror."""
+    target = Path(path)
+    db_file = dbmod.db_path(target.parent)
+    if db_file.exists():
+        conn = dbmod.connect(db_file)
+        try:
+            dbmod.write_ledger(conn, data)
+        finally:
+            conn.close()
+    payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    atomic_write(target, payload.encode("utf-8"))
+
+
+# Parsed shards keyed by path, invalidated by (mtime_ns, size). Parsing all
+# 247 shards costs ~145 ms and dominates a replan (all CSV loading is ~10 ms).
+# Steam updates touch only a handful of shards, so reusing the rest turns a
+# post-update replan from ~160 ms into ~15 ms. Shards are treated as immutable
+# once parsed: build_bytes() re-parses each blob instead of mutating this tree.
+_shard_cache: dict[str, tuple[int, int, Shard]] = {}
+_shard_cache_lock = threading.Lock()
+
+
+def clear_shard_cache() -> None:
+    """Drop cached shard trees (used by tests and after manual edits)."""
+    with _shard_cache_lock:
+        _shard_cache.clear()
+
+
+def _load_shard(path: Path) -> Shard:
+    try:
+        stat = path.stat()
+    except OSError:
+        stat = None
+    key = (stat.st_mtime_ns, stat.st_size) if stat else None
+    with _shard_cache_lock:
+        hit = _shard_cache.get(str(path))
+    if hit is not None and key is not None and hit[0] == key[0] and hit[1] == key[1]:
+        return hit[2]
+    try:
+        shard = parse_file(path)
+    except ShardError as exc:
+        raise ShardError(f"{path.name}: {exc}") from exc
+    if key is not None:
+        with _shard_cache_lock:
+            _shard_cache[str(path)] = (key[0], key[1], shard)
+    return shard
+
+
+def scan_shards(
+    appinfo_dir: str | Path,
+    shard_names: set[str] | frozenset[str] | None = None,
+) -> list[tuple[Shard, AppEntry]]:
+    """Parse shards (incrementally cached) and flatten their entries.
+
+    Parsing dominates a replan, so each Shard is cached by (mtime_ns, size):
+    a post-Steam-update replan only re-parses the shards that actually changed.
+    Threaded parsing was measured and rejected — the work is CPU-bound, so
+    threads under GIL were 5-10% *slower* than serial.
+    """
+    folder = Path(appinfo_dir)
+    if not folder.is_dir():
+        raise FileNotFoundError(f"appinfo 目录不存在: {folder}")
+    paths = sorted(folder.glob("appinfo_*.vdf"))
+    if shard_names is not None:
+        paths = [path for path in paths if path.name in shard_names]
+    if not paths:
+        return []
+
+    shards: list[tuple[Shard, AppEntry]] = []
+    for path in paths:
+        shard = _load_shard(path)
+        for entry in shard.entries:
+            shards.append((shard, entry))
+    return shards
+
+
+
+
+def _default_targets(defaults: dict, localized: dict[str, str]) -> list[str]:
+    targets = [defaults.get("primary_target", "common.name")]
+    for lang in defaults.get("sync_existing_localized", ["schinese", "sc_schinese"]):
+        if lang in localized:
+            targets.append(f"name_localized.{lang}")
+    return targets
+
+
+def _existing_targets(shard: Shard, entry, targets: list[str]) -> tuple[list[str], bool]:
+    """Keep only targets that really exist; report whether the primary one does."""
+    primary = targets[0] if targets else "common.name"
+    existing = [
+        target for target in targets
+        if is_allowed_target(target)
+        and resolve(shard.codec, entry.root, target_path(target)) is not None
+    ]
+    return existing, primary in existing
+
+
+def _is_applied(shard: Shard, entry, targets: list[str], desired: str) -> bool:
+    """True when every target already carries the desired name in the file."""
+    if not desired or not targets:
+        return False
+    for target in targets:
+        node = resolve(shard.codec, entry.root, target_path(target))
+        if node is None or node_text(shard.codec, node) != desired:
+            return False
+    return True
+
+
+def resolve_base(
+    original: str,
+    localized: dict[str, str],
+    priority: list[str],
+    community_names: dict[int, str] | None = None,
+    store_cache: dict[int, str] | None = None,
+    appid: int | None = None,
+    shared_names: dict[int, str] | None = None,
+) -> tuple[str, str]:
+    """Pick the Chinese base name and its source according to mapping_priority.
+
+    `common_name` covers games whose appinfo name is already Chinese
+    (e.g. 秦殇): there is no localized field to read, but the name on screen
+    is Chinese, so it must not be reported as "no Chinese name".
+    """
+    for candidate in priority:
+        if candidate == "local_schinese" and localized.get("schinese"):
+            return localized["schinese"], "local_schinese"
+        if candidate == "local_sc_schinese" and localized.get("sc_schinese"):
+            return localized["sc_schinese"], "local_sc_schinese"
+        if candidate == "common_name" and CJK.search(original or ""):
+            return original, "common_name"
+        if (
+            candidate == "shared_csv"
+            and shared_names and appid is not None and shared_names.get(appid)
+        ):
+            return shared_names[appid], "shared_csv"
+        if (
+            candidate == "community"
+            and community_names and appid is not None and community_names.get(appid)
+        ):
+            return community_names[appid], "community"
+        if (
+            candidate == "store_api"
+            and store_cache and appid is not None and store_cache.get(appid)
+        ):
+            return store_cache[appid], "store_api"
+
+    # 兜底：名字本身已是中文（配置里没写 common_name 时也不该误判）
+    if CJK.search(original or ""):
+        return original, "common_name"
+    return "", ""
+
+
+def _plan_entry(
+    shard: Shard,
+    entry: AppEntry,
+    record: dict,
+    *,
+    ruleset: RuleSet,
+    defaults: dict,
+    priority: list[str],
+    include_no_zh: bool,
+    include_unchanged: bool,
+    community_names: dict[int, str] | None,
+    store_cache: dict[int, str] | None,
+    shared_names: dict[int, str] | None = None,
+    original_names: dict[int, str] | None = None,
+) -> PlanEntry | None:
+    """Plan one app record. Returns None when the row is outside this view.
+
+    Branches, in order: unsupported (no writable name field) → manual override
+    → no Chinese name → approved by ledger / rule candidate.
+    """
+    original, localized = app_names(shard, entry)
+    app_type, type_raw = classify_app(shard, entry)
+    note = record.get("note", "")
+    targets, primary_ok = _existing_targets(
+        shard, entry, record.get("targets") or _default_targets(defaults, localized)
+    )
+    # 展示用的最初英文名：优先只读对照表（不会被写入流程覆盖），
+    # 其次台账残留值。两者都没有时留空，前端回退到实时读取的 original_name。
+    recorded_original = (record.get("original_name") or "").strip()
+    display_original = (original_names or {}).get(entry.appid) or recorded_original
+    common = {
+        "appid": entry.appid,
+        "shard": shard.path.name if shard.path else "",
+        "original_name": original,
+        "steam_original_name": display_original,
+        "localized": localized,
+        "app_type": app_type,
+        "type_raw": type_raw,
+    }
+
+    # 没有主名称字段（部分 DLC）根本无法写入，标记出来而不是让整批预检失败
+    if not primary_ok:
+        if not include_no_zh:
+            return None
+        return PlanEntry(
+            **common, base_name=original, desired_name="", source="none",
+            targets=[], status="unsupported", approved=False,
+            note=note or "该条目在 Steam 数据中没有名称字段，暂不支持改名",
+        )
+
+    if record.get("manual_override"):
+        desired = (record.get("desired_name") or "").strip()
+        if not desired and not include_no_zh:
+            return None
+        is_approved = bool(desired) and bool(record.get("approved", True))
+        in_file = bool(desired) and _is_applied(shard, entry, targets, desired)
+        return PlanEntry(
+            **common, base_name=desired, desired_name=desired, source="user_override",
+            targets=targets, note=note,
+            status="approved" if is_approved else ("candidate" if desired else "no_zh"),
+            approved=is_approved, manual_override=True,
+            applied=is_approved and in_file, in_file=in_file,
+        )
+
+    base = record.get("base_name") or ""
+    source = record.get("source", "")
+    if base and not CJK.search(base):
+        base, source = "", ""
+    if not base:
+        base, source = resolve_base(
+            original, localized, priority,
+            community_names=community_names, store_cache=store_cache,
+            appid=entry.appid, shared_names=shared_names,
+        )
+
+    if not base or not CJK.search(base):
+        if not include_no_zh:
+            return None
+        return PlanEntry(
+            **common, base_name=base or original, desired_name="",
+            source=source or "none", targets=targets, note=note,
+            status="no_zh", approved=False,
+        )
+
+    recorded_desired = (record.get("desired_name") or "").strip()
+    if record.get("approved") and recorded_desired:
+        desired = recorded_desired
+        if not CJK.search(desired):
+            note = note or "手动批准的目标名不含中文，请确认是否符合预期"
+        matched = list(record.get("applied_rules", []))
+        approved = True
+        status = "approved"
+    else:
+        if record.get("approved") and not recorded_desired:
+            note = note or "台账标记为已批准但目标名为空，已按规则重新生成候选"
+        desired, matched = apply_rules(base, ruleset)
+        approved = False
+        status = "candidate" if desired != original else "unchanged"
+
+    if (
+        status == "unchanged"
+        and not include_unchanged
+        and not include_no_zh
+        and source not in ("store_api", "community")
+    ):
+        return None
+
+    in_file = _is_applied(shard, entry, targets, desired)
+    return PlanEntry(
+        **common, base_name=base, desired_name=desired, applied_rules=matched,
+        source=source, targets=targets, note=note, status=status, approved=approved,
+        applied=approved and in_file, in_file=in_file,
+    )
+
+
+def build_plan(
+    appinfo_dir: str | Path,
+    names: dict,
+    ruleset: RuleSet,
+    include_unchanged: bool = False,
+    include_no_zh: bool = True,
+    store_cache: dict[int, str] | None = None,
+    community_names: dict[int, str] | None = None,
+    shared: SharedNames | None = None,
+    original_names: dict[int, str] | None = None,
+    shard_names: set[str] | frozenset[str] | None = None,
+    pairs: list[tuple[Shard, AppEntry]] | None = None,
+) -> list[PlanEntry]:
+    defaults = names.get("defaults", {})
+    records = names.get("entries", {})
+    priority = list(defaults.get("mapping_priority", [
+        "local_schinese", "local_sc_schinese", "community", "store_api",
+    ]))
+    # 老用户的 names.json 写死了优先级，新来源默认自动插入 common_name 之后；
+    # 显式设置 defaults.use_shared_names=false 即可关闭。
+    if shared and defaults.get("use_shared_names", True):
+        if "shared_csv" not in priority:
+            anchor = priority.index("user_override") + 1 if "user_override" in priority else 0
+            priority.insert(anchor, "shared_csv")
+    elif shared:
+        priority = [p for p in priority if p != "shared_csv"]
+    unknown = [p for p in priority if p not in KNOWN_PRIORITIES]
+    if unknown:
+        raise ValueError(
+            f"names.json: defaults.mapping_priority 含未知来源 {unknown}，"
+            f"可用值：{sorted(KNOWN_PRIORITIES)}"
+        )
+    plan: list[PlanEntry] = []
+
+    if pairs is None:
+        pairs = scan_shards(appinfo_dir, shard_names=shard_names)
+    for shard, entry in pairs:
+        item = _plan_entry(
+            shard, entry, records.get(str(entry.appid), {}),
+            ruleset=ruleset, defaults=defaults, priority=priority,
+            include_no_zh=include_no_zh, include_unchanged=include_unchanged,
+            community_names=community_names, store_cache=store_cache,
+            shared_names=shared.names if shared else None,
+            original_names=original_names,
+        )
+        if item is not None:
+            plan.append(item)
+    # 可选的库排序键：仅在 defaults.write_sortas_pinyin=true 且条目已批准时
+    # 生成。common.sortas 在多数分片里不存在，写入走新增键路径。
+    write_sortas = bool(defaults.get("write_sortas_pinyin", False))
+    for item in plan:
+        if write_sortas and item.approved and item.desired_name:
+            item.sortas = sortas_for(item.desired_name)
+        else:
+            item.sortas = ""
+
+    # 只检查最终目标名：原名是 Steam 官方数据，不该被我们的规则评判。
+    # 这是派生提示，赋值（而非追加）保证重复构建不会累积。
+    for item in plan:
+        warning = spacing_warning(item.desired_name)
+        item.warnings = [warning] if warning else []
+
+    if shared:
+        # 词库自身的格式问题挂到第一条命中该来源的行，避免静默失败
+        for item in plan:
+            if item.source == "shared_csv":
+                item.warnings.extend(f"共享词库：{w}" for w in shared.warnings[:5])
+                break
+        # 原名不符通常意味着 AppID 填错——宁可提示，也不能悄悄改错游戏
+        by_id = {item.appid: item for item in plan}
+        for appid, recorded in shared.originals.items():
+            item = by_id.get(appid)
+            if item is None or item.source != "shared_csv":
+                continue
+            current = item.original_name or ""
+            target = shared.names.get(appid, "")
+            if (
+                recorded.strip() and current
+                and not names_match(recorded, current)
+                and not (target and names_match(target, current))
+            ):
+                item.warnings.append(
+                    f"共享词库记的原名是「{recorded}」，Steam 当前是「{item.original_name}」，请核对 AppID"
+                )
+    return plan
+
+
+def plan_from_config(
+    appinfo_dir: str | Path,
+    config_dir: str | Path,
+    include_no_zh: bool = True,
+    include_unchanged: bool = False,
+    shard_names: set[str] | frozenset[str] | None = None,
+) -> list[PlanEntry]:
+    """Build a plan from names.json + rules.json + caches in one call.
+
+    Shared by the CLI and the web layer so both keep identical behaviour
+    instead of duplicating the load/build orchestration. ``shard_names``
+    restricts parsing to those shards (see ``scan_shards``); None means all.
+    """
+    folder = Path(config_dir)
+    db_file = dbmod.db_path(folder)
+
+    # SQLite 路径：只查本机拥有的 appid。这是 SQLite 唯一比全量加载更快的地方
+    # ——10 万条词库全量加载要 50-70ms，按主键 IN 查 803 条只要 ~1ms。
+    if db_file.exists():
+        pairs = scan_shards(appinfo_dir, shard_names=shard_names)
+        appids = {entry.appid for _, entry in pairs}
+        if appids:
+            baseline_shared = asset_dir("defaults") / "game_names.csv"
+            local_shared = folder / "game_names.csv"
+            conn = dbmod.connect(db_file)
+            try:
+                community = dbmod.query_community(conn, appids)
+                store = dbmod.query_store(conn, appids)
+                originals = dbmod.query_originals(conn, appids)
+                # 共享词库复用同一个连接：少一次 connect + 一次 CSV 指纹检查
+                dbmod.sync_shared_from_files(conn, baseline_shared, local_shared)
+                shared = dbmod.read_shared_names(conn)
+                shared.warnings = dbmod.read_shared_warnings(conn)
+            finally:
+                conn.close()
+            if not (shared.names or shared.originals):
+                # 库里的共享词库为空（未迁移）→ 回退 CSV 解析
+                shared = load_shared_names(baseline_shared, local_shared)
+            # 用户手工放的 CSV 覆盖层仍然优先（与 load_community_names 一致）
+            overlay = folder / "community_names.csv"
+            if overlay.exists():
+                try:
+                    community.update(
+                        {
+                            appid: name
+                            for appid, name in _read_community_csv(overlay).items()
+                            if appid in appids
+                        }
+                    )
+                except (OSError, ValueError):
+                    pass
+            if community or store or originals:
+                return build_plan(
+                    appinfo_dir,
+                    load_names(folder / "names.json"),
+                    load_rules(folder / "rules.json"),
+                    include_unchanged=include_unchanged,
+                    include_no_zh=include_no_zh,
+                    shard_names=shard_names,
+                    store_cache=store,
+                    community_names=community,
+                    shared=shared,
+                    original_names=originals,
+                    pairs=pairs,  # 复用已扫描结果，避免第二次遍历 247 个分片
+                )
+        # 表为空（未迁移/全新库）→ 落到下面的文件路径
+
+    return build_plan(
+        appinfo_dir,
+        load_names(folder / "names.json"),
+        load_rules(folder / "rules.json"),
+        include_unchanged=include_unchanged,
+        include_no_zh=include_no_zh,
+        shard_names=shard_names,
+        store_cache=load_store_cache(folder / "store_cache.json"),
+        community_names=load_community_names(folder / "community_names.json"),
+        shared=load_shared_names(
+            asset_dir("defaults") / "game_names.csv",
+            folder / "game_names.csv",
+        ),
+        original_names=merge_original_names(
+            load_original_names(asset_dir("defaults") / ORIGINAL_CSV_NAME),
+            load_original_names(folder / LEARNED_CSV_NAME),
+        ),
+    )
+
+
+def learn_original_names(
+    appinfo_dir: str | Path, config_dir: str | Path
+) -> tuple[int, int]:
+    """Capture English names seen in shards into the local CSV layer.
+
+    Only non-Chinese common.name values are learned, and only for AppIDs not
+    already covered by the bundled baseline. AppIDs the user has approved or
+    overridden are skipped: their shard name may be a chosen alias ("CS2"),
+    which must never be recorded as the original Steam name. Pure display aid:
+    it never feeds into target resolution or the write path. Returns (new, total).
+    """
+    folder = Path(config_dir)
+    local_path = folder / LEARNED_CSV_NAME
+    db_file = dbmod.db_path(folder)
+    baseline: dict[int, str] = {}
+    local: dict[int, str] = {}
+
+    # SQLite 优先：db 存在时 baseline/learned 都在库里，读 CSV 会与库脱节
+    if db_file.exists():
+        conn = dbmod.connect(db_file)
+        try:
+            baseline = dbmod.read_original_names(conn, "baseline")
+            local = dbmod.read_original_names(conn, "learned")
+        finally:
+            conn.close()
+    if not baseline:
+        baseline = load_original_names(asset_dir("defaults") / ORIGINAL_CSV_NAME)
+    if not local:
+        local = load_original_names(local_path)
+    learned = dict(local)
+
+    # Skip entries the user has touched. Approved/overridden names are user
+    # intent, not pristine Steam data — learning them would poison the display
+    # layer with aliases. A missing or broken ledger must not block learning.
+    modified: set[int] = set()
+    try:
+        ledger = load_names(folder / "names.json")
+        for key, record in (ledger.get("entries") or {}).items():
+            if not str(key).isdigit():
+                continue
+            if (
+                record.get("approved")
+                or record.get("manual_override")
+                or (record.get("desired_name") or "").strip()
+            ):
+                modified.add(int(key))
+    except (OSError, ValueError):
+        pass
+
+    for shard, entry in scan_shards(appinfo_dir):
+        name, _ = app_names(shard, entry)
+        appid = entry.appid
+        if appid in learned or appid in baseline or appid in modified or not name:
+            continue
+        if CJK.search(name):
+            continue
+        learned[appid] = name.strip()
+    new = len(learned) - len(local)
+    if new:
+        write_learned_originals(learned, local_path)  # CSV 交换格式
+        if db_file.exists():
+            conn = dbmod.connect(db_file)
+            try:
+                dbmod.write_original_names(conn, learned, "learned")
+            finally:
+                conn.close()
+    return new, len(learned)
+
+
+def pending_changes(plan: list[PlanEntry]) -> dict[str, dict[int, dict[str, str]]]:
+    """Approved changes not yet present in the file (Steam may have reset them)."""
+    grouped: dict[str, dict[int, dict[str, str]]] = {}
+    for item in plan:
+        if (
+            not item.approved or not item.desired_name or item.in_file
+            or item.status == "unsupported" or not item.targets
+        ):
+            continue
+        values = {target: item.desired_name for target in item.targets}
+        if item.sortas:
+            values["common.sortas"] = item.sortas
+        grouped.setdefault(item.shard, {})[item.appid] = values
+    return grouped
+
+
+def approved_changes(plan: list[PlanEntry]) -> dict[str, dict[int, dict[str, str]]]:
+    """Group approved desired names by shard and appid for the writer.
+
+    Entries flagged as unsupported (no writable name field) are skipped so a
+    single bad row can never block the whole batch.
+    """
+    grouped: dict[str, dict[int, dict[str, str]]] = {}
+    for item in plan:
+        if not item.approved or not item.desired_name:
+            continue
+        if item.status == "unsupported" or not item.targets:
+            continue
+        values = {target: item.desired_name for target in item.targets}
+        if item.sortas:
+            values["common.sortas"] = item.sortas
+        grouped.setdefault(item.shard, {})[item.appid] = values
+    return grouped

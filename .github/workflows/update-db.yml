@@ -1,0 +1,37 @@
+name: Update original names database
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"   # 每周一 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Fetch Steam AppList and merge missing English names
+        run: python scripts/update_original_names.py --limit 200
+
+      - name: Open pull request if the table changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: update original_names.csv from Steam AppList"
+          title: "[bot] 更新英文原名对照表"
+          body: |
+            每周自动从 Steam AppList 补全缺失的英文原名。
+
+            - 已有条目**绝不覆盖**：本表记录最初英文名，AppList 返回的可能是改名后的当前名
+            - 只追加纯 ASCII 名称，且每次最多 200 条，避免分发文件膨胀
+            - 需要按热度筛选时，可调整脚本的 `--limit` 或提供自定义 AppID 清单
+          branch: bot/update-original-names
+          delete-branch: true

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "meta": {
+    "title": "Steam 中文名映射与编辑台账",
+    "description": "首次运行时自动生成。工具读取本文件生成候选，按 rules.json 规范化，经批准后写入 Steam 分片；Steam 更新覆盖分片后，重新执行“应用写入”即可恢复。"
+  },
+  "defaults": {
+    "review_required": true,
+    "primary_target": "common.name",
+    "sync_existing_localized": [
+      "schinese",
+      "sc_schinese"
+    ],
+    "create_missing_localized": false,
+    "write_sortas_pinyin": false,
+    "mapping_priority": [
+      "user_override",
+      "shared_csv",
+      "local_schinese",
+      "local_sc_schinese",
+      "common_name",
+      "community",
+      "store_api"
+    ]
+  },
+  "summary": {},
+  "entries": {}
+}
