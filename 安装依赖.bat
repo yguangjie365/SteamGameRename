@@ -26,5 +26,5 @@ if errorlevel 1 (
 )
 
 echo.
-echo Done. Now double-click "Steam 中文名编辑器.bat" to start.
+echo Done. Now double-click "SteamGameRename.bat" to start.
 pause

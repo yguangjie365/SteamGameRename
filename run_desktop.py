@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Desktop shell for Steam Game Rename: native window + tray + quiet sync.
+"""Desktop shell for SteamGameRename: native window + tray + quiet sync.
 
 Wraps the same loopback HTTP service in a pywebview window, adds a tray icon,
 and补写已批准但被 Steam 覆盖的汉化 after Steam exits.
@@ -158,7 +158,7 @@ def build_tray(guard: SteamGuard, window, on_quit) -> "object":
     def run_sync(icon=None, item=None) -> None:
         changed = guard.sync_once()
         if icon is not None:
-            icon.notify(guard.last_result, "Steam Game Rename")
+            icon.notify(guard.last_result, "SteamGameRename")
         if changed:
             try:
                 window.evaluate_js("load(true)")
@@ -170,11 +170,11 @@ def build_tray(guard: SteamGuard, window, on_quit) -> "object":
         pystray.MenuItem("立即静默同步", run_sync),
         pystray.MenuItem("退出", lambda icon, item: on_quit()),
     )
-    return pystray.Icon("steam-cn-renamer", tray_image(), "Steam Game Rename", menu)
+    return pystray.Icon("steam-cn-renamer", tray_image(), "SteamGameRename", menu)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Steam Game Rename 桌面版")
+    parser = argparse.ArgumentParser(description="SteamGameRename 桌面版")
     parser.add_argument("--steam-dir", help="Steam 安装目录（默认自动探测）")
     parser.add_argument("--port", type=int, default=0, help="监听端口，0 表示自动分配")
     parser.add_argument(
@@ -210,7 +210,19 @@ def main(argv: list[str] | None = None) -> int:
     backup_root = Path(DEFAULT_BACKUPS)
 
     write_lock = threading.Lock()
-    handler = make_handler(str(steam_dir), config_dir, backup_root, write_lock)
+    # 窗口要在拿到端口后才建，所以退出回调延迟到建好再填。
+    # 前端点「退出服务」时走这里，直接收掉窗口与托盘，不留空壳进程。
+    quit_ref: dict[str, object] = {"fn": None}
+
+    def request_quit() -> None:
+        action = quit_ref["fn"]
+        if callable(action):
+            action()
+
+    handler = make_handler(
+        str(steam_dir), config_dir, backup_root, write_lock,
+        on_shutdown=request_quit,
+    )
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), handler)
     except OSError as exc:
@@ -248,7 +260,7 @@ def main(argv: list[str] | None = None) -> int:
 
     url = f"http://127.0.0.1:{port}/"
     window = webview.create_window(
-        "Steam Game Rename", url,
+        "SteamGameRename", url,
         width=1200, height=840, min_size=(900, 600),
     )
 
@@ -275,11 +287,17 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # noqa: BLE001
             pass
 
+    # 让 /api/shutdown（网页里的「退出服务」）能真正结束整个程序
+    quit_ref["fn"] = quit_app
+
     if not args.no_tray:
         icon = build_tray(guard, window, quit_app)
 
         def on_closing() -> bool:
-            # 关闭按钮 = 收进托盘；真正退出走托盘菜单或 Ctrl+C
+            # 关闭按钮 = 收进托盘。但主动退出（托盘菜单 / 网页「退出服务」）时
+            # 必须放行：window.destroy() 也会触发本事件，返回 False 会把它取消。
+            if quitting.is_set():
+                return True
             try:
                 window.hide()
             except Exception:  # noqa: BLE001

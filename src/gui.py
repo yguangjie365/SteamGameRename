@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 
 from backup import (
@@ -88,11 +90,16 @@ def make_handler(
     config_dir: Path,
     backup_root: Path = DEFAULT_BACKUPS,
     write_lock: threading.Lock | None = None,
+    on_shutdown: Callable[[], None] | None = None,
 ):
     """Build the request handler.
 
     ``write_lock`` lets an embedder (the desktop shell) share one lock with its
     own background writer, so a tray-triggered sync can never race the web UI.
+
+    ``on_shutdown`` is invoked when the UI asks to stop the service. The desktop
+    shell uses it to tear down the window and tray, so "退出服务" quits the whole
+    program instead of leaving an orphan window with no backend.
     """
     appinfo = Path(steam_dir) / "APPCache" / "APPInfo"
     names_path = config_dir / "names.json"
@@ -585,8 +592,22 @@ def make_handler(
                 return
 
             if path == "/api/shutdown":
-                self._json(200, {"message": "服务已停止，可以关闭此页面"})
+                desktop = on_shutdown is not None
+                self._json(200, {
+                    "message": "程序已退出" if desktop else "服务已停止，可以关闭此页面",
+                    "desktop": desktop,
+                })
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
+                if desktop:
+                    # 先让响应送达，再拆窗口/托盘，避免前端看到连接被重置
+                    def _deferred() -> None:
+                        time.sleep(0.2)
+                        try:
+                            on_shutdown()
+                        except Exception:  # noqa: BLE001 - 退出路径不能抛
+                            pass
+
+                    threading.Thread(target=_deferred, daemon=True).start()
                 return
 
             self._send(404, b"not found", "text/plain")

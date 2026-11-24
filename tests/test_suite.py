@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from collections import Counter
@@ -2011,6 +2012,56 @@ class DesktopShellTests(unittest.TestCase):
         # 当前环境未装 desktop 依赖时必须给出可读原因，而不是抛异常
         missing = rd.missing_desktop_deps()
         self.assertTrue(missing is None or isinstance(missing, str))
+
+
+class ShutdownEndpointTests(unittest.TestCase):
+    """桌面版的「退出服务」必须能拆掉整个程序，而不只是停掉 HTTP。"""
+
+    def _serve(self, cfg, on_shutdown=None):
+        import threading
+        from http.server import ThreadingHTTPServer
+
+        import gui
+
+        handler = gui.make_handler(str(cfg), cfg, cfg / "backups", None, on_shutdown)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    def _post(self, server, path):
+        import urllib.request
+
+        url = f"http://127.0.0.1:{server.server_port}{path}"
+        request = urllib.request.Request(url, data=b"{}", method="POST")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.loads(response.read())
+
+    def test_callback_fires_for_desktop_shell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
+            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
+            fired = threading.Event()
+            server = self._serve(cfg, fired.set)
+            try:
+                payload = self._post(server, "/api/shutdown")
+                self.assertTrue(payload["desktop"])
+                self.assertTrue(fired.wait(3), "桌面版必须收到退出回调")
+            finally:
+                server.server_close()
+
+    def test_browser_mode_reports_no_desktop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
+            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
+            server = self._serve(cfg, None)
+            try:
+                payload = self._post(server, "/api/shutdown")
+                self.assertFalse(payload["desktop"])
+                self.assertIn("服务已停止", payload["message"])
+            finally:
+                server.server_close()
 
 
 class WebDefaultsTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 [project]
 name = "steam-cn-renamer"
-version = "0.5.1"
+version = "0.5.2"
 description = "将 Steam 库游戏名称改为中文的本地工具（appinfo v42）"
 requires-python = ">=3.11"
 license = { text = "MIT" }

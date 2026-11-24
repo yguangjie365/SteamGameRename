@@ -1,4 +1,4 @@
-# Steam Game Rename
+# SteamGameRename
 
 把 Steam 库里的英文游戏名改成中文——直接改写本机 `appinfo_*.vdf` 缓存，客户端重启后库列表就是中文。
 
@@ -48,7 +48,7 @@ cd SteamGameRename
 
 **浏览器版**
 
-双击 `Steam 中文名编辑器.bat`，自动打开浏览器界面。
+双击 `SteamGameRename.bat`，自动打开浏览器界面。
 
 **命令行**
 

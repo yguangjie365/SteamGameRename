@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Steam Game Rename</title>
+<title>SteamGameRename</title>
 <style>
 :root{
   /* ---- Palette · deep ink-blue with tinted neutrals ---- */
@@ -305,7 +305,7 @@ td.stcell{vertical-align:middle}
 </head>
 <body>
 <div class="topbar">
-  <div class="brand"><span class="brand-mark">A</span>Steam Game Rename<span class="ver" id="appVer"></span></div>
+  <div class="brand"><span class="brand-mark">S</span>SteamGameRename<span class="ver" id="appVer"></span></div>
   <span id="steamBadge" class="badge-live"><span class="dot off"></span>Steam 状态未知</span>
   <button class="btn" onclick="load()">刷新</button>
   <button class="btn" id="taskBtn" onclick="openTasks()" title="联网更新社区词库或补全商店中文名">词库更新</button>
@@ -802,11 +802,14 @@ async function quitServer(){
   if(dirty&&!confirm('还有未保存的修改，退出后会丢失。确定退出？'))return;
   if(!confirm('退出后将停止本地服务，需要重新双击启动器才能再次打开。继续？'))return;
   try{
-    await fetch('/api/shutdown',{method:'POST'});
+    const r=await fetch('/api/shutdown',{method:'POST'});
+    const j=await r.json().catch(()=>({}));
+    // 桌面版会直接关闭整个窗口，不需要再显示"服务已停止"卡片
+    if(j.desktop)return;
     const box=document.createElement('div');
     box.className='halt';
     box.innerHTML='<div class="halt-card"><h2>服务已停止</h2>'+
-      '<p>可以关闭此页面。下次使用请双击桌面上的“Steam Game Rename”快捷方式。</p></div>';
+      '<p>可以关闭此页面。下次使用请双击桌面上的“SteamGameRename”快捷方式。</p></div>';
     document.body.appendChild(box);
   }catch(e){toast('退出失败：'+e,'err');}
 }

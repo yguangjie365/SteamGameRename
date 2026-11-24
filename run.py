@@ -223,7 +223,7 @@ def find_running(preferred: int, settings: dict) -> int | None:
 # ------------------------------------------------------------------- main
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Steam Game Rename 一键启动器",
+        description="SteamGameRename 一键启动器",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "示例:\n"
@@ -284,7 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         return 4
 
     print("=" * 52)
-    print("  Steam Game Rename")
+    print("  SteamGameRename")
     print(f"  Steam 目录 : {steam_dir}（{source}）")
     print(f"  编辑器地址 : http://127.0.0.1:{port}/")
     print("  关闭窗口或点页面右上角“退出服务”即可停止")

@@ -10,5 +10,5 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo Done. A shortcut named "Steam 中文名编辑器" is now on your Desktop.
+echo Done. A shortcut named "SteamGameRename" is now on your Desktop.
 pause
