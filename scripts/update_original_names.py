@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -21,12 +22,25 @@ DEFAULT_CSV = (
 FIELDS = ("GameID", "OriginalName", "ModifiedName")
 
 
+UPSTREAM_GONE = (
+    "Steam 已下线 ISteamApps/GetAppList（2025-11 起返回 404）。\n"
+    "公开且无需 key 的全量 AppList 接口已不存在；官方替代\n"
+    "partner.steam-api.com/IStoreService/GetAppList/v1/ 需要 Steamworks 发行商 key。\n"
+    "维护 original_names.csv 请改为本地手工追加，或自备 key 后修改本脚本。"
+)
+
+
 def fetch_applist(timeout: int = 60) -> dict[int, str]:
     request = urllib.request.Request(
         API, headers={"User-Agent": "steam-cn-renamer-db-bot/1.0"}
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code in (404, 403):
+            raise SystemExit(UPSTREAM_GONE) from exc
+        raise
     apps: dict[int, str] = {}
     for item in payload["applist"]["apps"]:
         raw = str(item.get("appid", ""))

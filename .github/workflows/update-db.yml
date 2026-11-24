@@ -1,8 +1,13 @@
 name: Update original names database
 
 on:
-  schedule:
-    - cron: "0 3 * * 1"   # 每周一 03:00 UTC
+  # 2025-11：Valve 已下线 ISteamApps/GetAppList（v2/v0002/v1 全部 404），
+  # 公开且无需 key 的全量 AppList 接口不复存在。官方替代
+  # partner.steam-api.com/IStoreService/GetAppList/v1/ 需要 Steamworks
+  # 发行商 key，普通开发者无法获取，因此停用定时触发，避免每周空跑失败。
+  # 恢复方式：拿到 partner key 后改脚本并取消下面两行注释。
+  # schedule:
+  #   - cron: "0 3 * * 1"   # 每周一 03:00 UTC
   workflow_dispatch:
 
 permissions:
