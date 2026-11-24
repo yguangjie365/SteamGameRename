@@ -85,6 +85,10 @@ def load_page() -> str:
     return (WEB_DIR / "index.html").read_text(encoding="utf-8")
 
 
+# 读写空闲超时（秒）：挂起的连接会抛 socket.timeout 并被回收
+HANDLER_TIMEOUT = 30
+
+
 def make_handler(
     steam_dir: str,
     config_dir: Path,
@@ -135,6 +139,9 @@ def make_handler(
         threading.Thread(target=_run, daemon=True).start()
 
     class Handler(BaseHTTPRequestHandler):
+        # 客户端声明了 Content-Length 却不发字节时，默认会永久阻塞一个线程；
+        # ThreadingHTTPServer 每连接一线程，本机进程可低成本耗尽。
+        timeout = HANDLER_TIMEOUT
         def log_message(self, *_args):
             return
 
@@ -145,6 +152,14 @@ def make_handler(
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            if content_type.startswith("text/html"):
+                # 单文件内联脚本必须有 unsafe-inline；其余一律收紧。
+                self.send_header(
+                    "Content-Security-Policy",
+                    "default-src 'none'; script-src 'unsafe-inline'; "
+                    "style-src 'unsafe-inline'; img-src 'self' data:; "
+                    "connect-src 'self'; form-action 'none'; frame-ancestors 'none'",
+                )
             self.end_headers()
             self.wfile.write(body)
 
@@ -294,9 +309,15 @@ def make_handler(
                                     "error": f"appid {appid}: {exc}"
                                 })
                                 return
-                        entries[appid] = {
-                            key: item[key] for key in fields if key in item
+                        # 合并而非替换：names.json 里用户手加的字段（备注、外部脚本
+                        # 写入的元数据）不在白名单里，整条替换会让它们无声消失。
+                        existing = entries.get(appid) or {}
+                        merged = {
+                            key: value for key, value in existing.items()
+                            if key not in fields
                         }
+                        merged.update({key: item[key] for key in fields if key in item})
+                        entries[appid] = merged
                     data["entries"] = entries
                     summary = data.setdefault("summary", {})
                     summary["entries_in_file"] = len(entries)

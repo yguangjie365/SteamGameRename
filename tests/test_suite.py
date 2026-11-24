@@ -2014,6 +2014,86 @@ class DesktopShellTests(unittest.TestCase):
         self.assertTrue(missing is None or isinstance(missing, str))
 
 
+class WebSaveMergeTests(unittest.TestCase):
+    """Web 保存必须保留白名单外的用户字段（曾整条替换导致静默丢失）。"""
+
+    def _serve(self, cfg):
+        import gui
+        from http.server import ThreadingHTTPServer
+
+        handler = gui.make_handler(str(FIXTURES.parent), cfg, cfg / "backups")
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    def _call(self, server, path, payload=None):
+        import urllib.request
+
+        port = server.server_port
+        url = f"http://127.0.0.1:{port}{path}"
+        headers = {"Origin": f"http://127.0.0.1:{port}"}
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(url, data=data, headers=headers,
+                                         method="POST" if data else "GET")
+        with urllib.request.urlopen(request, timeout=15) as response:
+            raw = response.read()
+            try:
+                return response, json.loads(raw)
+            except ValueError:  # 静态页面返回 HTML，不是 JSON
+                return response, raw
+
+    def test_custom_field_survives_save(self):
+        from mapping import load_names, save_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
+            ledger = {
+                "schema_version": 1, "meta": {}, "defaults": {}, "summary": {},
+                "entries": {"651430": {
+                    "shard": "appinfo_00.vdf", "desired_name": "铁拳7",
+                    "approved": True, "targets": ["common.name"],
+                    "custom_note": "我自己加的备注",
+                }},
+            }
+            save_names(ledger, cfg / "names.json")
+            server = self._serve(cfg)
+            try:
+                self._call(server, "/api/save", {"entries": [{
+                    "appid": "651430", "desired_name": "铁拳7",
+                    "approved": True, "targets": ["common.name"],
+                }]})
+            finally:
+                server.shutdown()
+                server.server_close()
+            saved = load_names(cfg / "names.json")["entries"]["651430"]
+            self.assertEqual(saved.get("custom_note"), "我自己加的备注")
+            self.assertEqual(saved["desired_name"], "铁拳7")
+
+    def test_html_response_has_csp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
+            shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
+            server = self._serve(cfg)
+            try:
+                response, _ = self._call(server, "/")
+                csp = response.headers.get("Content-Security-Policy") or ""
+            finally:
+                server.shutdown()
+                server.server_close()
+            self.assertIn("default-src 'none'", csp)
+            self.assertIn("frame-ancestors 'none'", csp)
+
+    def test_handler_has_socket_timeout(self):
+        import gui
+
+        self.assertIsNotNone(getattr(gui, "HANDLER_TIMEOUT", None))
+
+
 class ShutdownEndpointTests(unittest.TestCase):
     """桌面版的「退出服务」必须能拆掉整个程序，而不只是停掉 HTTP。"""
 

@@ -1,0 +1,38 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+    env:
+      PYTHONUTF8: "1"      # Windows 下中文路径/输出不设这个会乱码
+      STEAM_CN_RENAMER_NO_DB: "1"   # 测试保持纯文件路径，不建 SQLite
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install runtime + test deps
+        # 测试自带 sys.path 引导，不安装本项目；只装导入所需的运行时依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install typer rich httpx pydantic pytest
+
+      - name: Run test suite
+        run: python -m pytest tests -q
