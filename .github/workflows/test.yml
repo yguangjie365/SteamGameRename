@@ -21,6 +21,7 @@ jobs:
     env:
       PYTHONUTF8: "1"      # Windows 下中文路径/输出不设这个会乱码
       STEAM_CN_RENAMER_NO_DB: "1"   # 测试保持纯文件路径，不建 SQLite
+      STEAM_CN_ALLOW_NON_WINDOWS: "1"   # 写入用例在 Linux runner 上需要绕过平台守卫
     steps:
       - uses: actions/checkout@v4
 

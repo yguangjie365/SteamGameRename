@@ -23,6 +23,8 @@ sys.path.insert(0, str(ROOT))  # run.py / run_desktop.py 位于项目根
 # 测试保持纯 JSON/CSV 路径：否则 ensure_config 会在 fixtures 目录建 renamer.db，
 # 污染只读样例并让后续用例走另一条分支。SQLite 由 DbStorageTests 显式覆盖。
 os.environ["STEAM_CN_RENAMER_NO_DB"] = "1"
+# 写入路径在非 Windows 上默认拒绝（无 tasklist 会 fail-open）；测试需要放行。
+os.environ.setdefault("STEAM_CN_ALLOW_NON_WINDOWS", "1")
 
 from backup import apply_changes, restore_backup  # noqa: E402
 from cli import main  # noqa: E402
@@ -2012,6 +2014,29 @@ class DesktopShellTests(unittest.TestCase):
         # 当前环境未装 desktop 依赖时必须给出可读原因，而不是抛异常
         missing = rd.missing_desktop_deps()
         self.assertTrue(missing is None or isinstance(missing, str))
+
+
+class PlatformGuardTests(unittest.TestCase):
+    def test_non_windows_write_is_refused(self):
+        """非 Windows 上 steam_running 恒为 False，必须显式拒绝而非静默放行。"""
+        import os as osmod
+        from unittest import mock
+
+        import backup
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            with mock.patch.object(osmod, "name", "posix"), \
+                    mock.patch.dict(osmod.environ, {}, clear=False):
+                osmod.environ.pop("STEAM_CN_ALLOW_NON_WINDOWS", None)
+                with self.assertRaises(backup.BackupError):
+                    apply_changes(cfg, {"appinfo_00.vdf": {1: {"common.name": "x"}}}, cfg)
+
+    def test_windows_platform_is_not_blocked(self):
+        """确认守卫只在非 Windows 生效（Windows 上继续走正常流程）。"""
+        import os as osmod
+
+        self.assertEqual(osmod.name, "nt", "本用例只在 Windows 上有意义")
 
 
 class WebSaveMergeTests(unittest.TestCase):

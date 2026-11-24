@@ -35,7 +35,9 @@ Steam 官方只对部分游戏提供简体中文名，大量独立游戏、老�
 
 ## 快速开始
 
-需要 **Python 3.11+**（Windows）。
+需要 **Python 3.11+**，**仅支持 Windows**。
+
+程序依赖 Windows 的 `tasklist` 检测 Steam 进程、依赖注册表定位安装目录，并用 `os.replace` 做原子替换。在 Linux/macOS 上即使指定 `--steam-dir` 也会被写入保护拒绝（因为无法确认 Steam 是否在运行），这是有意为之，不是 bug。
 
 ```bash
 git clone https://github.com/yguangjie365/SteamGameRename.git

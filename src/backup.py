@@ -267,6 +267,14 @@ def apply_changes(
     Any failure triggers a full restore from the just-created backup.
     """
     source = Path(appinfo_dir)
+    # 非 Windows 上没有 tasklist，steam_running() 会恒为 False——等于放弃"运行中
+    # 不写入"这条保护。与其静默 fail-open，不如明确拒绝。
+    if os.name != "nt" and os.environ.get("STEAM_CN_ALLOW_NON_WINDOWS") != "1":
+        raise BackupError(
+            "本工具仅支持 Windows：非 Windows 平台无法检测 Steam 进程，"
+            "为避免在 Steam 运行时写入缓存，已拒绝执行。"
+            "（仅在测试环境可设 STEAM_CN_ALLOW_NON_WINDOWS=1 绕过）"
+        )
     if require_steam_closed and steam_running(ttl=0):
         raise BackupError("Steam is running; close it before applying changes")
     if not changes:
