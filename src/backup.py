@@ -291,8 +291,10 @@ def apply_changes(
 
     Any failure triggers a full restore from the just-created backup.
     """
-    source = Path(appinfo_dir)
+    # 守卫必须早于任何 Path 构造：测试会 mock os.name='posix'，晚一步会让
+    # Windows 上的 pathlib 尝试实例化 PosixPath 而抛 NotImplementedError。
     _reject_unsupported_platform()
+    source = Path(appinfo_dir)
     if require_steam_closed and steam_running(ttl=0):
         raise BackupError("Steam is running; close it before applying changes")
     if not changes:

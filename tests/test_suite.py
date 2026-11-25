@@ -2126,10 +2126,14 @@ class PlatformGuardTests(unittest.TestCase):
                     apply_changes(cfg, {"appinfo_00.vdf": {1: {"common.name": "x"}}}, cfg)
 
     def test_windows_platform_is_not_blocked(self):
-        """确认守卫只在非 Windows 生效（Windows 上继续走正常流程）。"""
+        """Windows 上守卫不阻断。用 mock 模拟 nt，Linux CI 上也能验证。"""
         import os as osmod
+        from unittest import mock
 
-        self.assertEqual(osmod.name, "nt", "本用例只在 Windows 上有意义")
+        import backup
+
+        with mock.patch.object(osmod, "name", "nt"):
+            backup._reject_unsupported_platform()  # 不抛异常即通过
 
 
 class WebSaveMergeTests(unittest.TestCase):
