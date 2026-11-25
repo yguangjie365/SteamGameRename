@@ -2016,6 +2016,99 @@ class DesktopShellTests(unittest.TestCase):
         self.assertTrue(missing is None or isinstance(missing, str))
 
 
+class WriteGuardTests(unittest.TestCase):
+    """写入链路的四道新守卫：平台、原始完整性、陈旧解析树、中断回滚。"""
+
+    def _copy_fixture(self, tmp: Path) -> Path:
+        appinfo = tmp / "APPInfo"
+        shutil.copytree(FIXTURES, appinfo)
+        return appinfo
+
+    def test_restore_backup_has_platform_guard(self):
+        """restore_backup 曾经漏掉守卫，非 Windows 上可直接覆盖分片。"""
+        import os as osmod
+        from unittest import mock
+
+        import backup
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            with mock.patch.object(osmod, "name", "posix"), \
+                    mock.patch.dict(osmod.environ, {}, clear=False):
+                osmod.environ.pop("STEAM_CN_ALLOW_NON_WINDOWS", None)
+                with self.assertRaises(backup.BackupError):
+                    restore_backup(cfg, cfg / "APPInfo", require_steam_closed=False)
+
+    def test_steam_check_failure_counts_as_running(self):
+        """tasklist 异常时必须 fail-closed，不能当作"Steam 未运行"。"""
+        import os as osmod
+        from unittest import mock
+
+        import backup
+
+        with mock.patch.object(osmod, "name", "nt"), \
+                mock.patch.object(backup.subprocess, "run",
+                                  side_effect=PermissionError("blocked")):
+            backup._last_steam_check = None
+            self.assertTrue(backup.steam_running(ttl=0))
+
+    def test_corrupt_source_shard_is_refused(self):
+        """原始分片校验不通过时必须拒绝写入，而不是重建后"洗白"。"""
+        from unittest import mock
+
+        import backup
+
+        with tempfile.TemporaryDirectory() as tmp:
+            appinfo = self._copy_fixture(Path(tmp))
+            changes = {"appinfo_00.vdf": {651430: {"common.name": "测试"}}}
+            with mock.patch.object(backup, "verify", return_value=["blob sha1 mismatch"]):
+                with self.assertRaises(backup.BackupError) as ctx:
+                    apply_changes(appinfo, changes, Path(tmp) / "backups",
+                                  require_steam_closed=False)
+            self.assertIn("原始分片完整性", str(ctx.exception))
+
+    def test_stale_parsed_shard_is_reparsed(self):
+        """传入的解析树若与磁盘指纹不符，必须重新解析，不能用旧树覆盖。"""
+        import backup
+        from shard import parse_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            appinfo = self._copy_fixture(Path(tmp))
+            path = appinfo / "appinfo_00.vdf"
+            stale = parse_file(path)
+            # 模拟 Steam 在解析之后改写了该分片（内容与长度都变）
+            path.write_bytes(path.read_bytes() + b"\x00" * 4)
+            self.assertFalse(backup._shard_is_current(stale, path))
+
+    def test_keyboard_interrupt_rolls_back(self):
+        """Ctrl+C 抛的是 KeyboardInterrupt（BaseException），也必须回滚。"""
+        from unittest import mock
+
+        import backup
+
+        with tempfile.TemporaryDirectory() as tmp:
+            appinfo = self._copy_fixture(Path(tmp))
+            original = (appinfo / "appinfo_00.vdf").read_bytes()
+            changes = {
+                "appinfo_00.vdf": {651430: {"common.name": "测试改名"}},
+                "appinfo_17.vdf": {443510: {"common.name": "测试改名2"}},
+            }
+            real_write = backup.atomic_write
+            calls = {"n": 0}
+
+            def interrupt_second(path, data):
+                calls["n"] += 1
+                real_write(path, data)
+                if calls["n"] == 1:
+                    raise KeyboardInterrupt()
+
+            with mock.patch("backup.atomic_write", side_effect=interrupt_second):
+                with self.assertRaises(KeyboardInterrupt):
+                    apply_changes(appinfo, changes, Path(tmp) / "backups",
+                                  require_steam_closed=False)
+            self.assertEqual((appinfo / "appinfo_00.vdf").read_bytes(), original)
+
+
 class PlatformGuardTests(unittest.TestCase):
     def test_non_windows_write_is_refused(self):
         """非 Windows 上 steam_running 恒为 False，必须显式拒绝而非静默放行。"""
@@ -2112,6 +2205,78 @@ class WebSaveMergeTests(unittest.TestCase):
                 server.server_close()
             self.assertIn("default-src 'none'", csp)
             self.assertIn("frame-ancestors 'none'", csp)
+
+    def test_auto_restart_rejects_string(self):
+        """bool("false") 会变 True，必须严格校验类型。"""
+        import urllib.error
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
+            shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
+            server = self._serve(cfg)
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    self._call(server, "/api/sync", {"auto_restart": "false"})
+                self.assertEqual(ctx.exception.code, 400)
+            finally:
+                server.shutdown()
+                server.server_close()
+
+    def test_mapping_priority_rejects_unknown_source(self):
+        """非法来源写进 defaults 会让 /api/plan 直接报错，必须在保存时拦住。"""
+        import urllib.error
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
+            shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
+            server = self._serve(cfg)
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    self._call(server, "/api/defaults", {
+                        "defaults": {"mapping_priority": ["unknown_source"]}
+                    })
+                self.assertEqual(ctx.exception.code, 400)
+            finally:
+                server.shutdown()
+                server.server_close()
+
+    def test_apply_safe_restarts_steam_on_early_return(self):
+        """关闭 Steam 后即使「无已批准项」提前返回，也必须在 finally 里重启。"""
+        import urllib.error
+        from unittest import mock
+
+        import gui
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
+            shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
+            server = self._serve(cfg)
+            try:
+                with mock.patch.object(gui, "steam_running", return_value=True), \
+                        mock.patch.object(gui, "steam_shutdown", return_value=True), \
+                        mock.patch.object(gui, "plan_from_config", return_value=[]), \
+                        mock.patch.object(gui, "approved_changes", return_value={}), \
+                        mock.patch.object(gui, "steam_start", return_value=True) as start:
+                    try:
+                        self._call(server, "/api/apply-safe", {})
+                    except urllib.error.HTTPError as exc:
+                        self.assertEqual(exc.code, 400)
+                        detail = exc.read().decode("utf-8")
+                        self.assertIn("没有已批准", detail, f"意外响应: {detail}")
+                    # 客户端收到 400 时服务器线程可能还没走到 finally，轮询等待
+                    deadline = time.monotonic() + 2.0
+                    while not start.called and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                    self.assertTrue(
+                        start.called,
+                        "关闭 Steam 后即使提前返回，也必须尝试重启",
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
 
     def test_handler_has_socket_timeout(self):
         import gui

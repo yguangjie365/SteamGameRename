@@ -78,6 +78,9 @@ class Shard:
     keys: list[str]
     codec: BinaryVDF
     entries: list[AppEntry]
+    # 解析时的 (st_mtime_ns, st_size)。用于在写入前判断磁盘上的分片是否
+    # 已被 Steam 改写——只在 parse_file() 里填充，parse_bytes() 为空。
+    source_key: tuple[int, int] | None = None
 
     @cached_property
     def appids(self) -> set[int]:
@@ -155,7 +158,14 @@ def parse_bytes(data: bytes, path: Path | None = None) -> Shard:
 
 def parse_file(path: str | Path) -> Shard:
     p = Path(path)
-    return parse_bytes(p.read_bytes(), p)
+    try:
+        stat = p.stat()
+    except OSError:
+        stat = None
+    shard = parse_bytes(p.read_bytes(), p)
+    if stat is not None:
+        shard.source_key = (stat.st_mtime_ns, stat.st_size)
+    return shard
 
 
 def verify(shard: Shard) -> list[str]:

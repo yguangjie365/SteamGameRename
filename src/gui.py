@@ -24,6 +24,7 @@ from paths import DEFAULT_BACKUPS, DEFAULT_CONFIG, asset_dir, ensure_config
 from store import fetch_store_names
 from version import __version__
 from mapping import (
+    KNOWN_PRIORITIES,
     TARGET_HINT,
     approved_changes,
     is_allowed_target,
@@ -369,9 +370,15 @@ def make_handler(
                 priority = defaults.get("mapping_priority")
                 if priority is not None and (
                     not isinstance(priority, list)
-                    or not all(isinstance(x, str) for x in priority)
+                    or not all(
+                        isinstance(x, str) and x in KNOWN_PRIORITIES
+                        for x in priority
+                    )
                 ):
-                    self._json(400, {"error": "mapping_priority 必须是字符串列表"})
+                    self._json(400, {
+                        "error": "mapping_priority 必须是合法来源列表：" +
+                                 ", ".join(sorted(KNOWN_PRIORITIES))
+                    })
                     return
                 try:
                     with lock:
@@ -458,7 +465,10 @@ def make_handler(
                     return
                 if body is None:
                     return
-                auto_restart = bool(body.get("auto_restart", False))
+                auto_restart = body.get("auto_restart", False)
+                if not isinstance(auto_restart, bool):
+                    self._json(400, {"error": "auto_restart 必须是布尔值"})
+                    return
                 steam_exe = Path(steam_dir) / "steam.exe"
                 needs_restart = False
                 report = None
@@ -550,6 +560,9 @@ def make_handler(
                     self._json(400, {"error": "Steam 未运行，请直接用「应用写入」"})
                     return
                 exe = Path(steam_dir) / "steam.exe"
+                # 一旦成功关闭 Steam，无论后续是 early return 还是异常，都必须
+                # 在 finally 里尝试重启，否则用户会被留在 Steam 关闭的状态。
+                steam_was_shut = False
                 try:
                     with lock:
                         # 1) 优雅关闭；失败则中止，绝不强行 kill
@@ -559,6 +572,7 @@ def make_handler(
                                          "请手动退出后重试"
                             })
                             return
+                        steam_was_shut = True
                         # 2) 写入（Steam 已确认退出）
                         plan = plan_from_config(
                             appinfo, config_dir, include_no_zh=False
@@ -570,8 +584,9 @@ def make_handler(
                         report = apply_changes(
                             appinfo, changes, backups, require_steam_closed=False
                         )
-                        # 3) 写入成功后重启
+                        # 3) 写入成功后重启；置回 False 避免 finally 重复启动
                         restarted = steam_start(exe)
+                        steam_was_shut = False
                     self._json(200, {
                         "message": f"已写入 {len(report['changed'])} 个分片",
                         "changed": report["changed"],
@@ -582,6 +597,12 @@ def make_handler(
                     self._json(400, {"error": str(exc)})
                 except Exception as exc:
                     self._json(500, {"error": str(exc)})
+                finally:
+                    if steam_was_shut:
+                        try:
+                            steam_start(exe)
+                        except OSError:  # 重启失败也要把主流程的结论交回前端
+                            pass
                 return
 
             if path == "/api/restore":

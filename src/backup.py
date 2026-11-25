@@ -59,7 +59,9 @@ def _steam_running_uncached() -> bool:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except Exception:
-        return False
+        # 无法确认状态时按"可能在运行"处理：宁可拒绝写入，也不要在 Steam
+        # 运行时动缓存。只读接口仍然显示"未知/运行中"，不影响使用。
+        return True
     return b"steam.exe" in result.stdout.lower()
 
 
@@ -190,6 +192,7 @@ def restore_backup(
     appinfo_dir: str | Path,
     require_steam_closed: bool = False,
 ) -> int:
+    _reject_unsupported_platform()
     if require_steam_closed and steam_running(ttl=0):
         raise BackupError("Steam is running; close it before restoring")
     manifest = verify_backup(backup_dir)
@@ -255,6 +258,28 @@ def prune_backups(backup_root: str | Path, keep: int = 8) -> list[str]:
     return removed
 
 
+def _reject_unsupported_platform() -> None:
+    """非 Windows 上没有 tasklist，steam_running() 恒为 False——等于放弃
+    "Steam 运行时不写入"这条保护。写入与恢复都必须先过这道门。"""
+    if os.name != "nt" and os.environ.get("STEAM_CN_ALLOW_NON_WINDOWS") != "1":
+        raise BackupError(
+            "本工具仅支持 Windows：非 Windows 平台无法检测 Steam 进程，"
+            "为避免在 Steam 运行时写入缓存，已拒绝执行。"
+            "（仅在测试环境可设 STEAM_CN_ALLOW_NON_WINDOWS=1 绕过）"
+        )
+
+
+def _shard_is_current(shard: Shard, path: Path) -> bool:
+    """磁盘上的分片是否仍是解析时那一份（mtime + size 比对）。"""
+    if shard.source_key is None:  # parse_bytes 构造的，无从判断
+        return True
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    return (stat.st_mtime_ns, stat.st_size) == shard.source_key
+
+
 def apply_changes(
     appinfo_dir: str | Path,
     changes: dict[str, dict[int, dict[str, str]]],
@@ -267,14 +292,7 @@ def apply_changes(
     Any failure triggers a full restore from the just-created backup.
     """
     source = Path(appinfo_dir)
-    # 非 Windows 上没有 tasklist，steam_running() 会恒为 False——等于放弃"运行中
-    # 不写入"这条保护。与其静默 fail-open，不如明确拒绝。
-    if os.name != "nt" and os.environ.get("STEAM_CN_ALLOW_NON_WINDOWS") != "1":
-        raise BackupError(
-            "本工具仅支持 Windows：非 Windows 平台无法检测 Steam 进程，"
-            "为避免在 Steam 运行时写入缓存，已拒绝执行。"
-            "（仅在测试环境可设 STEAM_CN_ALLOW_NON_WINDOWS=1 绕过）"
-        )
+    _reject_unsupported_platform()
     if require_steam_closed and steam_running(ttl=0):
         raise BackupError("Steam is running; close it before applying changes")
     if not changes:
@@ -285,10 +303,21 @@ def apply_changes(
     for name in sorted(changes):
         if Path(name).name != name or name in (".", ".."):
             raise BackupError(f"invalid shard name: {name!r}")
+        path = source / name
         shard = parsed.get(name)
+        # 外部传入的解析树可能已过期（plan 与 apply 之间 Steam 改写过），
+        # 用旧树重建会把新数据覆盖掉，所以先比对指纹。
+        if shard is not None and not _shard_is_current(shard, path):
+            shard = None
         if shard is None:
-            shard = parse_file(source / name)
+            shard = parse_file(path)
             parsed[name] = shard
+        # 原始分片的 CRC/SHA1 从未被校验：若磁盘上已有损坏，重建会重新计算
+        # 校验值，把一个错误文件"洗白"成合法文件。必须先验原始数据。
+        problems += [
+            f"{name}: 原始分片完整性校验失败: {problem}"
+            for problem in verify(shard)
+        ]
         problems += [
             f"{name}: {problem}" for problem in check_targets(
                 shard, changes[name], allow_create=CREATABLE_TARGETS
@@ -320,7 +349,9 @@ def apply_changes(
                 raise BackupError(f"{name}: rebuilt file failed verification: {problems}")
             atomic_write(path, rebuilt)
             changed.append(name)
-    except Exception as original:
+    # KeyboardInterrupt 继承 BaseException，不是 Exception。多分片写入中按 Ctrl+C
+    # 必须同样回滚，否则会留下「部分分片已改、部分未改」的混合状态。
+    except BaseException as original:
         try:
             restore_backup(backup, source)
         except Exception as restore_error:
