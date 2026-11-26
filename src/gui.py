@@ -25,7 +25,6 @@ from paths import DEFAULT_BACKUPS, DEFAULT_CONFIG, asset_dir, ensure_config
 from store import fetch_store_names
 from version import __version__
 from mapping import (
-    KNOWN_PRIORITIES,
     TARGET_HINT,
     approved_changes,
     is_allowed_target,
@@ -49,7 +48,7 @@ def _source_signature(appinfo: Path, config_dir: Path) -> tuple:
     paths = sorted(appinfo.glob("appinfo_*.vdf"))
     paths += [
         config_dir / name
-        for name in ("names.json", "rules.json", "store_cache.json",
+        for name in ("names.json", "store_cache.json",
                      "community_names.json", "community_names.csv",
                      "game_names.csv", "renamer.db", "renamer.db-wal",
                      "renamer.db-shm")
@@ -215,14 +214,6 @@ def make_handler(
                     "config_dir": str(config_dir),
                 })
                 return
-            if path == "/api/defaults":
-                try:
-                    with lock:
-                        data = load_names(names_path)
-                    self._json(200, {"defaults": data.get("defaults", {})})
-                except (OSError, ValueError) as exc:
-                    self._json(400, {"error": str(exc)})
-                return
             if path == "/api/backups":
                 self._json(200, {"backups": list_backups(backups)})
                 return
@@ -280,7 +271,7 @@ def make_handler(
                     return
                 fields = (
                     "shard", "original_name", "original_localized", "base_name",
-                    "applied_rules", "desired_name", "source", "targets",
+                    "desired_name", "source", "targets",
                     "status", "approved", "manual_override", "note",
                     "app_type", "type_raw",
                 )
@@ -332,75 +323,6 @@ def make_handler(
                     with _plan_lock:
                         _plan_cache.clear()
                 self._json(200, {"message": f"已保存 {len(entries)} 条"})
-                return
-
-            if path == "/api/defaults":
-                body = self._read_json()
-                if body is None:
-                    return
-                defaults = body.get("defaults")
-                if not isinstance(defaults, dict):
-                    self._json(400, {"error": "defaults must be an object"})
-                    return
-                allowed = {
-                    "review_required", "primary_target", "sync_existing_localized",
-                    "create_missing_localized", "write_sortas_pinyin",
-                    "mapping_priority",
-                }
-                bad_keys = [key for key in defaults if key not in allowed]
-                if bad_keys:
-                    self._json(400, {"error": f"不允许的默认字段: {bad_keys}"})
-                    return
-                langs = defaults.get("sync_existing_localized")
-                if langs is not None and (
-                    not isinstance(langs, list)
-                    or not all(
-                        isinstance(x, str) and x.isascii()
-                        and x.replace("_", "").isalnum() for x in langs
-                    )
-                ):
-                    self._json(400, {"error": "sync_existing_localized 必须是语言代码列表"})
-                    return
-                for flag in (
-                    "review_required", "create_missing_localized",
-                    "write_sortas_pinyin",
-                ):
-                    if flag in defaults and not isinstance(defaults[flag], bool):
-                        self._json(400, {"error": f"{flag} 必须是布尔值"})
-                        return
-                if "primary_target" in defaults and not is_allowed_target(
-                    defaults["primary_target"]
-                ):
-                    self._json(400, {
-                        "error": f"primary_target 非法（{TARGET_HINT}）"
-                    })
-                    return
-                priority = defaults.get("mapping_priority")
-                if priority is not None and (
-                    not isinstance(priority, list)
-                    or not all(
-                        isinstance(x, str) and x in KNOWN_PRIORITIES
-                        for x in priority
-                    )
-                ):
-                    self._json(400, {
-                        "error": "mapping_priority 必须是合法来源列表：" +
-                                 ", ".join(sorted(KNOWN_PRIORITIES))
-                    })
-                    return
-                try:
-                    with lock:
-                        data = load_names(names_path)
-                        data.setdefault("defaults", {}).update(defaults)
-                        save_names(data, names_path)
-                        _plan_cache.clear()
-                except (OSError, ValueError, sqlite3.Error) as exc:
-                    self._json(400, {"error": str(exc)})
-                    return
-                self._json(200, {
-                    "message": "写入策略已保存",
-                    "defaults": data["defaults"],
-                })
                 return
 
             if path == "/api/update-community":

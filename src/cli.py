@@ -146,15 +146,15 @@ def plan(
     if as_json:
         console.print_json(json.dumps([i.to_dict() for i in items], ensure_ascii=False))
         return
-    table = Table("批准", "AppID", "类型", "原名", "目标中文名", "规则", "状态")
+    table = Table("批准", "AppID", "类型", "原名", "建议名称", "自定义名称", "状态")
     for item in items:
         table.add_row(
             "✔" if item.approved else "—",
-            str(item.appid), item.app_type, item.original_name, item.desired_name,
-            ",".join(item.applied_rules), item.status,
+            str(item.appid), item.app_type, item.original_name, item.base_name,
+            item.custom_name, item.status,
         )
     console.print(table)
-    console.print(f"候选 {len(items)} 条，其中已批准 {sum(1 for i in items if i.approved)} 条")
+    console.print(f"建议 {len(items)} 条，其中已批准 {sum(1 for i in items if i.approved)} 条")
 
 
 @app.command()

@@ -198,7 +198,10 @@ def validate_name(text: str) -> str:
     return text
 
 
-# 汉字（扩展A + 基本区 + 兼容表意文字）与 ASCII 数字紧邻的边界
+# 汉字（扩展A + 基本区 + 兼容表意文字）
+CJK = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
+
+# 汉字与 ASCII 数字紧邻的边界
 _CJK_DIGIT_ADJACENT = re.compile(
     r"[\u3400-\u9fff\uf900-\ufaff][0-9]|[0-9][\u3400-\u9fff\uf900-\ufaff]"
 )

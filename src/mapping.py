@@ -1,4 +1,4 @@
-"""Name planning: merge shard data, names.json and normalization rules."""
+"""Name planning: merge Steam shard data, the ledger and name dictionaries."""
 from __future__ import annotations
 
 import json
@@ -25,10 +25,9 @@ from game_names import (
 )
 from paths import asset_dir
 from pinyin import sortas_for
-from rules import CJK, RuleSet, apply_rules, load_rules
 from shard import AppEntry, Shard, ShardError, app_names, parse_file, target_path
 from store import fetch_store_names, load_store_cache  # noqa: F401
-from vdf import find_string, get_node, node_text, resolve, spacing_warning
+from vdf import CJK, find_string, get_node, node_text, resolve, spacing_warning
 
 TYPE_LABELS = {
     "game": "游戏",
@@ -75,7 +74,6 @@ class NameEntrySpec(BaseModel):
     original_localized: dict = Field(default_factory=dict)
     base_name: str | None = None
     desired_name: str | None = None
-    applied_rules: list[str] = Field(default_factory=list)
     source: str | None = None
     targets: list[str] | None = None
     status: str | None = None
@@ -103,10 +101,10 @@ class PlanEntry:
     localized: dict[str, str] = field(default_factory=dict)
     base_name: str = ""
     desired_name: str = ""
-    applied_rules: list[str] = field(default_factory=list)
+    custom_name: str = ""
     source: str = ""
     targets: list[str] = field(default_factory=list)
-    status: str = "candidate"
+    status: str = "suggested"
     approved: bool = False
     manual_override: bool = False
     note: str = ""
@@ -129,7 +127,7 @@ class PlanEntry:
             "steam_original_name": self.steam_original_name,
             "original_localized": self.localized,
             "base_name": self.base_name,
-            "applied_rules": self.applied_rules,
+            "custom_name": self.custom_name,
             "desired_name": self.desired_name,
             "source": self.source,
             "targets": self.targets,
@@ -383,7 +381,6 @@ def _plan_entry(
     entry: AppEntry,
     record: dict,
     *,
-    ruleset: RuleSet,
     defaults: dict,
     priority: list[str],
     include_no_zh: bool,
@@ -393,19 +390,13 @@ def _plan_entry(
     shared_names: dict[int, str] | None = None,
     original_names: dict[int, str] | None = None,
 ) -> PlanEntry | None:
-    """Plan one app record. Returns None when the row is outside this view.
-
-    Branches, in order: unsupported (no writable name field) → manual override
-    → no Chinese name → approved by ledger / rule candidate.
-    """
+    """Plan one app record from its suggestion and optional custom name."""
     original, localized = app_names(shard, entry)
     app_type, type_raw = classify_app(shard, entry)
     note = record.get("note", "")
     targets, primary_ok = _existing_targets(
         shard, entry, record.get("targets") or _default_targets(defaults, localized)
     )
-    # 展示用的最初英文名：优先只读对照表（不会被写入流程覆盖），
-    # 其次台账残留值。两者都没有时留空，前端回退到实时读取的 original_name。
     recorded_original = (record.get("original_name") or "").strip()
     display_original = (original_names or {}).get(entry.appid) or recorded_original
     common = {
@@ -418,7 +409,6 @@ def _plan_entry(
         "type_raw": type_raw,
     }
 
-    # 没有主名称字段（部分 DLC）根本无法写入，标记出来而不是让整批预检失败
     if not primary_ok:
         if not include_no_zh:
             return None
@@ -428,22 +418,8 @@ def _plan_entry(
             note=note or "该条目在 Steam 数据中没有名称字段，暂不支持改名",
         )
 
-    if record.get("manual_override"):
-        desired = (record.get("desired_name") or "").strip()
-        if not desired and not include_no_zh:
-            return None
-        is_approved = bool(desired) and bool(record.get("approved", True))
-        in_file = bool(desired) and _is_applied(shard, entry, targets, desired)
-        return PlanEntry(
-            **common, base_name=desired, desired_name=desired, source="user_override",
-            targets=targets, note=note,
-            status="approved" if is_approved else ("candidate" if desired else "no_zh"),
-            approved=is_approved, manual_override=True,
-            applied=is_approved and in_file, in_file=in_file,
-        )
-
-    base = record.get("base_name") or ""
-    source = record.get("source", "")
+    base = "" if record.get("manual_override") else (record.get("base_name") or "")
+    source = "" if record.get("manual_override") else record.get("source", "")
     if base and not CJK.search(base):
         base, source = "", ""
     if not base:
@@ -452,12 +428,28 @@ def _plan_entry(
             community_names=community_names, store_cache=store_cache,
             appid=entry.appid, shared_names=shared_names,
         )
-
     if not base or not CJK.search(base):
+        base = ""
+
+    if record.get("manual_override"):
+        desired = (record.get("desired_name") or "").strip()
+        if not desired and not include_no_zh:
+            return None
+        is_approved = bool(desired) and bool(record.get("approved", True))
+        in_file = bool(desired) and _is_applied(shard, entry, targets, desired)
+        return PlanEntry(
+            **common, base_name=base, custom_name=desired, desired_name=desired,
+            source="user_override", targets=targets, note=note,
+            status="approved" if is_approved else ("suggested" if desired else "no_zh"),
+            approved=is_approved, manual_override=True,
+            applied=is_approved and in_file, in_file=in_file,
+        )
+
+    if not base:
         if not include_no_zh:
             return None
         return PlanEntry(
-            **common, base_name=base or original, desired_name="",
+            **common, base_name="", desired_name="",
             source=source or "none", targets=targets, note=note,
             status="no_zh", approved=False,
         )
@@ -467,15 +459,14 @@ def _plan_entry(
         desired = recorded_desired
         if not CJK.search(desired):
             note = note or "手动批准的目标名不含中文，请确认是否符合预期"
-        matched = list(record.get("applied_rules", []))
         approved = True
         status = "approved"
     else:
         if record.get("approved") and not recorded_desired:
-            note = note or "台账标记为已批准但目标名为空，已按规则重新生成候选"
-        desired, matched = apply_rules(base, ruleset)
+            note = note or "台账标记为已批准但目标名为空，请重新采纳建议或输入自定义名称"
+        desired = base
         approved = False
-        status = "candidate" if desired != original else "unchanged"
+        status = "unchanged" if desired == original else "suggested"
 
     if (
         status == "unchanged"
@@ -487,7 +478,8 @@ def _plan_entry(
 
     in_file = _is_applied(shard, entry, targets, desired)
     return PlanEntry(
-        **common, base_name=base, desired_name=desired, applied_rules=matched,
+        **common, base_name=base, custom_name="",
+        desired_name=desired,
         source=source, targets=targets, note=note, status=status, approved=approved,
         applied=approved and in_file, in_file=in_file,
     )
@@ -496,7 +488,6 @@ def _plan_entry(
 def build_plan(
     appinfo_dir: str | Path,
     names: dict,
-    ruleset: RuleSet,
     include_unchanged: bool = False,
     include_no_zh: bool = True,
     store_cache: dict[int, str] | None = None,
@@ -532,7 +523,7 @@ def build_plan(
     for shard, entry in pairs:
         item = _plan_entry(
             shard, entry, records.get(str(entry.appid), {}),
-            ruleset=ruleset, defaults=defaults, priority=priority,
+            defaults=defaults, priority=priority,
             include_no_zh=include_no_zh, include_unchanged=include_unchanged,
             community_names=community_names, store_cache=store_cache,
             shared_names=shared.names if shared else None,
@@ -587,7 +578,7 @@ def plan_from_config(
     include_unchanged: bool = False,
     shard_names: set[str] | frozenset[str] | None = None,
 ) -> list[PlanEntry]:
-    """Build a plan from names.json + rules.json + caches in one call.
+    """Build a plan from the SQLite ledger and local name dictionaries.
 
     Shared by the CLI and the web layer so both keep identical behaviour
     instead of duplicating the load/build orchestration. ``shard_names``
@@ -635,7 +626,6 @@ def plan_from_config(
                 return build_plan(
                     appinfo_dir,
                     load_names(folder / "names.json"),
-                    load_rules(folder / "rules.json"),
                     include_unchanged=include_unchanged,
                     include_no_zh=include_no_zh,
                     shard_names=shard_names,
@@ -650,7 +640,6 @@ def plan_from_config(
     return build_plan(
         appinfo_dir,
         load_names(folder / "names.json"),
-        load_rules(folder / "rules.json"),
         include_unchanged=include_unchanged,
         include_no_zh=include_no_zh,
         shard_names=shard_names,

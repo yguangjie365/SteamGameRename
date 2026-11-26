@@ -2,7 +2,7 @@
   "schema_version": 1,
   "meta": {
     "title": "Steam 中文名映射与编辑台账",
-    "description": "首次运行时自动生成。工具读取本文件生成候选，按 rules.json 规范化，经批准后写入 Steam 分片；Steam 更新覆盖分片后，重新执行“应用写入”即可恢复。"
+    "description": "首次运行时自动生成。工具从共享词库、Steam 本地化字段和社区词库生成建议名称；用户采纳建议或提交自定义名称并保存台账后，再人工执行应用写入。"
   },
   "defaults": {
     "review_required": true,

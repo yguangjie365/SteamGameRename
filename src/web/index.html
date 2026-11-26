@@ -179,7 +179,7 @@ td.original{color:#d4deea}
   transition:opacity .15s,border-color .15s,background .15s}
 .srch:hover{opacity:1;border-color:var(--line2);background:var(--panel3);color:var(--text)}
 tr:hover .srch{opacity:1}
-.edit-cell{display:flex;align-items:center;gap:5px}
+.custom-cell{display:flex;align-items:center;gap:5px}
 .name-input{flex:1;min-width:0;height:31px;padding:5px 9px;border-radius:7px;
   border:1px solid transparent;background:rgba(255,255,255,.028);color:var(--text);outline:none;font-size:12.5px;
   transition:border-color .15s,box-shadow .15s,background .15s}
@@ -211,25 +211,18 @@ tr:hover .srch{opacity:1}
 td.stcell{vertical-align:middle}
 .st.approved{background:rgba(97,214,139,.1);color:#82e5a3;border-color:rgba(97,214,139,.2)}
 .st.applied{background:rgba(97,214,139,.2);color:#b8f4c8;border-color:rgba(97,214,139,.4)}
-.st.candidate{background:rgba(114,182,255,.1);color:#91caff;border-color:rgba(114,182,255,.2)}
+.st.suggested{background:rgba(114,182,255,.1);color:#91caff;border-color:rgba(114,182,255,.2)}
 .st.no_zh{background:rgba(231,184,91,.1);color:#efc975;border-color:rgba(231,184,91,.2)}
 .st.unsupported{background:rgba(244,119,112,.09);color:#ffa39e;border-color:rgba(244,119,112,.24)}
 .st.unchanged{background:rgba(148,166,188,.07);color:#a3b3c7;border-color:rgba(148,166,188,.14)}
 
-.rules{font-size:11px;color:var(--muted)}
-.rules .none{color:var(--faint)}
-.rule-pill{display:inline-block;padding:2px 7px;border-radius:5px;background:rgba(148,166,188,.08);
-  border:1px solid rgba(148,166,188,.14);font-size:10.5px;color:#b6c3d4}
-
-.switch{position:relative;width:34px;height:20px;display:inline-block;vertical-align:middle;flex:0 0 34px}
-.switch input{opacity:0;width:0;height:0}
-.slider{position:absolute;inset:0;background:#33445b;border-radius:20px;cursor:pointer;
-  transition:.22s var(--ease);box-shadow:inset 0 1px 3px rgba(0,0,0,.3)}
-.slider:before{content:"";position:absolute;width:14px;height:14px;left:3px;top:3px;
-  background:#fff;border-radius:50%;transition:.22s var(--ease);box-shadow:0 1px 3px rgba(0,0,0,.35)}
-.switch input:checked+.slider{background:linear-gradient(180deg,#4a97ed,#367fdf)}
-.switch input:checked+.slider:before{transform:translateX(14px)}
-.switch input:focus-visible+.slider{outline:2px solid var(--accent);outline-offset:2px}
+.suggestion-cell{display:flex;align-items:center;gap:6px;min-width:0}
+.suggestion-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#dce9f8}
+.adopt{flex:0 0 auto;min-height:27px;padding:4px 8px;font-size:11px;border-color:rgba(114,182,255,.28);
+  background:rgba(114,182,255,.09);color:#a9d3ff}
+.adopt:hover{border-color:var(--accent);background:rgba(114,182,255,.17)}
+.custom-cell{display:flex;align-items:center;gap:5px}
+.custom-cell .name-input{width:100%}
 
 .pager{display:flex;justify-content:space-between;align-items:center;gap:var(--sp-3);
   padding:11px 18px;color:var(--muted);font-size:11.5px;border-top:1px solid var(--line);background:var(--bg2)}
@@ -303,7 +296,7 @@ td.stcell{vertical-align:middle}
   .search{flex:1 1 100%;min-width:0;max-width:none}
   .filters select{flex:1 1 calc(50% - 8px)}
   .table-wrap{overflow-x:auto;overflow-y:hidden;border-radius:0}
-  table{min-width:860px}
+  table{min-width:980px}
   .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   .card .v{font-size:23px}
   .chip{min-height:32px}
@@ -345,7 +338,6 @@ td.stcell{vertical-align:middle}
 <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M6.1 9a7 7 0 0 1 11.6-2L20 11M4 13l2.3 4a7 7 0 0 0 11.6-2"/></symbol>
   <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18h10a4 4 0 0 0 .8-7.9A6 6 0 0 0 6.3 9.2 4.5 4.5 0 0 0 7 18Z"/><path d="M12 12v5m-2-2 2 2 2-2"/></symbol>
-  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
   <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9m-5.7-6a8 8 0 1 0 11.4 0"/></symbol>
   <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 4h12l2 2v14H5Z"/><path d="M8 4v6h8V4M8 20v-6h8v6"/></symbol>
   <symbol id="i-sync" viewBox="0 0 24 24"><path d="M20 7h-5V2M4 17h5v5"/><path d="M5.6 8a8 8 0 0 1 13-2L20 7M4 17l1.4 4a8 8 0 0 0 13-2"/></symbol>
@@ -360,7 +352,6 @@ td.stcell{vertical-align:middle}
       <span id="taskPing" class="badge-live" hidden title="后台任务进度"><span class="dot on"></span><span id="taskMsg">—</span></span>
       <button class="btn" onclick="load()" title="重新载入台账与 Steam 分片"><svg class="icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新</span></button>
       <button class="btn" id="taskBtn" onclick="openTasks()" title="联网更新社区词库或补全商店中文名"><svg class="icon"><use href="#i-cloud"/></svg><span class="btn-label">词库更新</span></button>
-      <button class="btn" id="cfgBtn" onclick="openConfig()" title="配置简繁中文同步与拼音排序"><svg class="icon"><use href="#i-sliders"/></svg><span class="btn-label">写入策略</span></button>
       <button class="btn ghost" id="quitBtn" onclick="quitServer()" title="停止本地服务并退出程序"><svg class="icon"><use href="#i-power"/></svg><span class="btn-label">退出服务</span></button>
     </div>
   </div>
@@ -388,15 +379,15 @@ td.stcell{vertical-align:middle}
          title="含「已生效」与「待写入」两部分，可在状态下拉里进一步细分">
       <span class="k">已批准</span><span class="v num" id="sApproved">—</span><span class="hint">已审核</span>
     </button>
-    <button type="button" class="card b" data-status="candidate" onclick="filterStatus('candidate')">
-      <span class="k">规则候选</span><span class="v num" id="sCandidate">—</span><span class="hint">待确认</span>
+    <button type="button" class="card b" data-status="suggested" onclick="filterStatus('suggested')">
+      <span class="k">待采纳</span><span class="v num" id="sSuggested">—</span><span class="hint">建议名称</span>
     </button>
     <button type="button" class="card a" data-status="no_zh" onclick="filterStatus('no_zh')">
       <span class="k">无中文名</span><span class="v num" id="sNozh">—</span><span class="hint">需补译名</span>
     </button>
     <button type="button" class="card m" data-status="unchanged" onclick="filterStatus('unchanged')"
          title="原名已是目标名、无需改动的条目">
-      <span class="k">无需改动</span><span class="v num" id="sUnchanged">—</span><span class="hint">已规范</span>
+      <span class="k">无需改动</span><span class="v num" id="sUnchanged">—</span><span class="hint">原名一致</span>
     </button>
     <button type="button" class="card r" data-status="unsupported" onclick="filterStatus('unsupported')"
          title="Steam 数据中没有名称字段、无法改名的条目">
@@ -409,7 +400,7 @@ td.stcell{vertical-align:middle}
 
   <section class="library-panel">
     <div class="library-heading">
-      <div><h2>名称清单</h2><p>点击表头排序，在目标中文名列直接编辑</p></div>
+      <div><h2>名称清单</h2><p>采纳建议名称，或输入自定义名称后提交；保存台账不会直接写入 Steam</p></div>
       <span class="local-badge">数据仅在本机处理</span>
     </div>
     <div class="filters">
@@ -424,7 +415,7 @@ td.stcell{vertical-align:middle}
         <option value="applied">已生效（已写入分片）</option>
         <option value="pending">待写入（批准但未生效）</option>
         <option value="approved">已批准</option>
-        <option value="candidate">规则候选</option><option value="no_zh">无中文名</option>
+        <option value="suggested">待采纳</option><option value="no_zh">无中文名</option>
         <option value="unchanged">无需改动</option>
         <option value="unsupported">不支持（无名称字段）</option>
       </select>
@@ -443,7 +434,7 @@ td.stcell{vertical-align:middle}
       <div class="summary" id="filterSummary">—</div>
       <span id="lastSearch" class="last-search" hidden></span>
       <div class="chips">
-        <button type="button" class="chip" onclick="approveVisible(true)">批量批准当前筛选</button>
+        <button type="button" class="chip" onclick="approveVisible(true)">采纳当前筛选建议</button>
         <button type="button" class="chip" onclick="approveVisible(false)">取消这些条目的批准</button>
         <button type="button" class="chip" onclick="exportCsv()"><svg class="icon"><use href="#i-download"/></svg>导出当前筛选</button>
         <button type="button" class="chip" onclick="openRestore()">恢复备份…</button>
@@ -453,16 +444,15 @@ td.stcell{vertical-align:middle}
     <div class="table-wrap">
       <table>
         <colgroup>
-          <col style="width:46px"><col style="width:82px"><col style="width:90px">
-          <col style="width:25%"><col style="width:25%"><col style="width:124px"><col style="width:96px">
+          <col style="width:82px"><col style="width:90px">
+          <col style="width:24%"><col style="width:24%"><col style="width:24%"><col style="width:110px">
         </colgroup>
         <thead><tr>
-          <th style="cursor:default" aria-label="批准">批准</th>
           <th data-sort="app_type">类型</th>
           <th data-sort="appid">AppID</th>
-          <th data-sort="original_name">原名</th>
-          <th data-sort="desired_name">目标中文名</th>
-          <th style="cursor:default">命中规则</th>
+          <th data-sort="original_name">游戏名称</th>
+          <th data-sort="base_name">建议名称</th>
+          <th data-sort="custom_name">自定义名称</th>
           <th data-sort="status">状态</th>
         </tr></thead>
         <tbody id="rows"></tbody>
@@ -507,21 +497,6 @@ td.stcell{vertical-align:middle}
     </div>
   </div>
 </div>
-<div class="mask" id="cfgMask">
-  <div class="modal">
-    <h3>写入策略</h3>
-    <p class="hint">保存到 names.json 的 defaults，影响后续生成的写入计划。</p>
-    <label class="chk"><input type="checkbox" id="cfgTchinese"> 同步覆盖繁体中文（name_localized.tchinese）</label>
-    <label class="chk"><input type="checkbox" id="cfgSortas"> 写入拼音首字母（common.sortas，Steam 库按拼音排序）</label>
-    <label class="chk"><input type="checkbox" id="cfgCreate"> 允许补建缺失的本地化字段</label>
-    <p class="hint">拼音排序对分片中不存在 sortas 字段的游戏会自动追加，写入前后均有 CRC + SHA1 校验与备份。</p>
-    <div class="actions">
-      <button class="btn" onclick="closeConfig()">取消</button>
-      <button class="btn danger" onclick="saveConfig()">保存策略</button>
-    </div>
-  </div>
-</div>
-
 <div class="mask" id="taskMask">
   <div class="modal">
     <h2>联网更新词库</h2>
@@ -536,11 +511,8 @@ td.stcell{vertical-align:middle}
 
 <script>
 const LABELS={game:'游戏',music:'原声音轨',application:'软件',tool:'工具',other:'其他'};
-const ST={approved:'已批准',candidate:'规则候选',no_zh:'无中文名',unchanged:'无需改动',
+const ST={approved:'已批准',suggested:'待采纳',no_zh:'无中文名',unchanged:'无需改动',
   applied:'已生效',unsupported:'不支持'};
-const RULE={R1_strip_latin_tail:'去英文尾',R2_punctuation_fullwidth:'标点',
-  R3_whitespace:'空格',R4_strip_trademark:'商标',R5_cjk_latin_spacing:'间距',
-  R6_strip_book_title_marks:'书名号'};
 const SOURCE_LABEL={user_override:'手动编辑',shared_csv:'共享词库',local_schinese:'Steam 简体中文',
   local_sc_schinese:'Steam 简中备选',common_name:'原名即中文',community:'社区词库',store_api:'Steam 商店'};
 let rows=[],view=[],page=0,size=100,sortKey='',sortAsc=true,dirty=false;
@@ -590,17 +562,17 @@ function csvField(v){
   return /[",\n\r]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
 }
 function buildCsv(list){
-  const head=['AppID','原名','目标中文名','类型','状态','来源','命中规则'];
+  const head=['AppID','游戏名称','建议名称','自定义名称','类型','状态','来源'];
   const lines=[head.map(csvField).join(',')];
   list.forEach(d=>{
     lines.push([
       d.appid,
       origOf(d),
-      d.desired_name||'',
+      d.base_name||'',
+      d.custom_name||'',
       LABELS[d.app_type]||d.app_type||'',
       statusLabel(d),
       d.source||'',
-      (d.applied_rules||[]).join(' / '),
     ].map(csvField).join(','));
   });
   return lines.join('\r\n');
@@ -664,7 +636,7 @@ function compute(){
   const s=document.getElementById('statusFilter').value;
   view=rows.filter(d=>(!t||d.app_type===t)&&matchStatus(d,s)&&
     (!q||String(d.appid).includes(q)||origOf(d).toLowerCase().includes(q)||
-     (d.desired_name||'').toLowerCase().includes(q)));
+     (d.base_name||'').toLowerCase().includes(q)||(d.custom_name||'').toLowerCase().includes(q)));
   if(sortKey){
     view.sort((a,b)=>{
       if(sortKey==='appid'){const x=Number(a.appid),y=Number(b.appid);return sortAsc?x-y:y-x;}
@@ -680,7 +652,7 @@ function updateStats(){
   const scope=t?rows.filter(d=>d.app_type===t):rows;
   document.getElementById('sTotal').textContent=scope.length;
   document.getElementById('sApproved').textContent=scope.filter(d=>d.approved).length;
-  document.getElementById('sCandidate').textContent=scope.filter(d=>d.status==='candidate').length;
+  document.getElementById('sSuggested').textContent=scope.filter(d=>d.status==='suggested').length;
   document.getElementById('sNozh').textContent=scope.filter(d=>d.status==='no_zh').length;
   document.getElementById('sUnchanged').textContent=scope.filter(d=>d.status==='unchanged').length;
   document.getElementById('sUnsupported').textContent=scope.filter(d=>d.status==='unsupported').length;
@@ -734,20 +706,12 @@ function clearDirty(){
   btn.querySelector('.btn-label').textContent='保存台账';
   btn.classList.remove('primary');
 }
-function ruleHtml(rules){
-  if(!rules||!rules.length)return '<span class="none">—</span>';
-  const first=RULE[rules[0]]||rules[0];
-  return `<span class="rule-pill" title="${esc(rules.join(', '))}">${esc(first)}</span>`
-    +(rules.length>1?` <span class="none">+${rules.length-1}</span>`:'');
-}
 function updateRow(id){
   const d=find(id);if(!d)return;
   const cell=document.querySelector(`[data-status="${id}"]`);
   if(cell){cell.textContent=statusLabel(d);cell.className='st '+statusClass(d);}
   const tr=document.querySelector(`tr[data-id="${id}"]`);
-  if(tr)tr.classList.toggle('changed',!!d.manual_override);
-  const revert=document.querySelector(`[data-revert="${id}"]`);
-  if(revert)revert.classList.toggle('show',!!d.manual_override);
+  if(tr)tr.classList.toggle('changed',!!d.custom_name);
   const bad=spacingIssue(d.desired_name);
   const warn=document.querySelector(`[data-warn="${id}"]`);
   if(warn){warn.style.display=bad?'':'none';warn.title=bad?SPACING_HINT:'';}
@@ -768,16 +732,15 @@ function render(){
   updateStats();
   const tbody=document.getElementById('rows');tbody.innerHTML='';
   const start=page*size,slice=view.slice(start,start+size);
-  if(!slice.length){tbody.innerHTML='<tr><td colspan="7" class="empty">没有符合条件的记录</td></tr>';}
+  if(!slice.length){tbody.innerHTML='<tr><td colspan="6" class="empty">没有符合条件的记录</td></tr>';}
   slice.forEach(d=>{
     const tr=document.createElement('tr');
     tr.dataset.id=d.appid;
-    if(d.manual_override)tr.className='changed';
+    if(d.custom_name)tr.className='changed';
     if(String(d.appid)===searchedId)tr.classList.add('searched');
     const blocked=d.status==='unsupported';
-    tr.innerHTML=`<td><label class="switch"><input type="checkbox" ${d.approved?'checked':''}
-        ${blocked?'disabled':''} onchange="setApproved('${d.appid}',this.checked)"><span class="slider"></span></label></td>
-      <td><span class="tag ${d.app_type||'other'}">${LABELS[d.app_type]||'其他'}</span></td>
+    const adopted=d.approved&&!d.custom_name&&d.desired_name===d.base_name;
+    tr.innerHTML=`<td><span class="tag ${d.app_type||'other'}">${LABELS[d.app_type]||'其他'}</span></td>
       <td class="appid num"><a class="applink" href="https://store.steampowered.com/app/${d.appid}/"
         target="_blank" rel="noopener noreferrer" title="在 Steam 商店查看 ${d.appid}">${d.appid}</a></td>
       <td class="original"><div class="orig-cell">
@@ -786,17 +749,22 @@ function render(){
         <button class="srch" data-search="${d.appid}" title="用${engineLabel()}搜索这款游戏"
           onclick="searchGame('${d.appid}')">🔍</button>
       </div></td>
-      <td><div class="edit-cell">
-        <input class="name-input" value="${esc(d.desired_name)}" placeholder="${blocked?'该条目无名称字段':'输入中文名'}"
-          title="${esc(blocked?(d.note||'该条目在 Steam 数据中没有名称字段'):d.desired_name)}"
-          ${blocked?'disabled':''} onchange="setName('${d.appid}',this.value)">
-        <button class="revert ${d.manual_override?'show':''}" data-revert="${d.appid}"
-          title="还原为基准名" onclick="revertRow('${d.appid}')">↺</button>
+      <td><div class="suggestion-cell">
+        <span class="suggestion-text" title="${esc(d.base_name||'暂无建议名称')}">${esc(d.base_name)||'<span class="none">—</span>'}</span>
+        <button class="btn adopt" data-adopt="${d.appid}" ${blocked||!d.base_name?'disabled':''}
+          onclick="adoptRow('${d.appid}')">${adopted?'已采纳':'采纳'}</button>
+      </div></td>
+      <td><div class="custom-cell">
+        <input class="name-input" value="${esc(d.custom_name)}" placeholder="${blocked?'该条目无名称字段':'输入自定义名称'}"
+          aria-label="AppID ${d.appid} 自定义名称" title="${esc(blocked?(d.note||'该条目在 Steam 数据中没有名称字段'):'输入后点击提交或按 Enter')}"
+          ${blocked?'disabled':''} onkeydown="if(event.key==='Enter'){event.preventDefault();submitCustom('${d.appid}')}">
+        <button class="btn adopt" ${blocked?'disabled':''} onclick="submitCustom('${d.appid}')">提交</button>
+        <button class="revert ${d.custom_name?'show':''}" data-revert="${d.appid}"
+          title="清除自定义名称并取消批准" onclick="revertRow('${d.appid}')">↺</button>
         <span class="name-warn" data-warn="${d.appid}"
           title="${esc((d.warnings||[])[0]||SPACING_HINT)}"
           style="${spacingIssue(d.desired_name)?'':'display:none'}">!</span>
       </div></td>
-      <td class="rules">${ruleHtml(d.applied_rules)}</td>
       <td class="stcell"><span class="st ${statusClass(d)}" data-status="${d.appid}"
         title="${esc([d.source?'来源：'+(SOURCE_LABEL[d.source]||d.source):'',d.note,spacingIssue(d.desired_name)?SPACING_HINT:''].filter(Boolean).join('\n'))}">${statusLabel(d)}</span></td>`;
     tbody.appendChild(tr);
@@ -814,49 +782,38 @@ function filterStatus(v){
   document.getElementById('statusFilter').value=v;
   page=0;render();
 }
-function setName(id,v){const d=find(id);if(!d)return;
-  if(d.status==='unsupported'){toast('该条目在 Steam 数据中没有名称字段，无法改名','err');render();return;}
-  v=v.trim();
-  if(!v){toast('名称不能为空','err');render();return;}
-  if(v===(d.desired_name||'')){                 // 值没变就不算改动，也不重绘（避免丢焦点）
-    const same=document.querySelector(`tr[data-id="${id}"] .name-input`);
-    if(same)same.value=v;
-    return;
-  }
-  d.desired_name=v;d.manual_override=true;d.approved=true;d.status='approved';
-  d.applied=false;d.in_file=false;
+function adoptRow(id){const d=find(id);if(!d)return;
+  if(d.status==='unsupported'||!d.base_name){toast('该条目没有可采纳的建议名称','err');return;}
+  d.desired_name=d.base_name;d.custom_name='';d.manual_override=false;d.approved=true;d.status='approved';
+  d.applied=!!d.in_file;
+  markDirty();render();toast('已采纳「'+d.desired_name+'」，请保存台账');}
+function submitCustom(id){const d=find(id);if(!d)return;
+  if(d.status==='unsupported'){toast('该条目在 Steam 数据中没有名称字段，无法改名','err');return;}
   const input=document.querySelector(`tr[data-id="${id}"] .name-input`);
-  if(input)input.title=v;
-  if(document.getElementById('statusFilter').value)render();else updateRow(id);
-  markDirty();}
+  const v=(input?input.value:'').trim();
+  if(!v){revertRow(id);return;}
+  d.desired_name=v;d.custom_name=v;d.manual_override=true;d.approved=true;d.status='approved';
+  d.applied=!!d.in_file;
+  markDirty();render();toast('已提交自定义名称，请保存台账');}
 function revertRow(id){const d=find(id);if(!d)return;
-  d.desired_name=d.base_name||'';d.manual_override=false;d.approved=false;
+  d.desired_name=d.base_name||'';d.custom_name='';d.manual_override=false;d.approved=false;
   d.applied=false;d.in_file=false;
   d.status=unapprovedStatus(d);
-  const input=document.querySelector(`tr[data-id="${id}"] .name-input`);
-  if(input)input.value=d.desired_name;
-  if(document.getElementById('statusFilter').value)render();else updateRow(id);
-  markDirty();toast('已还原 '+id);}
+  markDirty();render();toast('已清除自定义名称并取消批准');}
 function unapprovedStatus(d){
-  if(!d.desired_name)return 'no_zh';
-  if(d.manual_override)return 'candidate';
-  return d.desired_name===d.original_name?'unchanged':'candidate';
+  if(!d.base_name)return 'no_zh';
+  return d.base_name===d.original_name?'unchanged':'suggested';
 }
-function setApproved(id,v){
-  const d=find(id);if(!d)return;
-  if(d.status==='unsupported'){toast('该条目无法写入，已跳过','err');render();return;}
-  if(v&&!d.desired_name){toast('请先填写目标中文名','err');render();return;}
-  d.approved=v;d.status=v?'approved':unapprovedStatus(d);
-  d.applied=!!v&&!!d.in_file;    // applied 由“文件里是否已是该名”决定，取消批准不抹掉文件事实
-  // 若启用了状态筛选，行已不属于当前视图，需整表重绘而不是局部更新
-  if(document.getElementById('statusFilter').value)render();else updateRow(id);
-  markDirty();}
 function approveVisible(v){let n=0,skipped=0;view.forEach(d=>{
   if(d.status==='unsupported'){skipped++;return;}
-  if(d.approved!==v&&d.desired_name){d.approved=v;d.status=v?'approved':unapprovedStatus(d);
-    d.applied=!!v&&!!d.in_file;n++;}});
+  if(v){
+    if(d.custom_name||!d.base_name){skipped++;return;}
+    if(!d.approved||d.desired_name!==d.base_name){d.desired_name=d.base_name;d.custom_name='';
+      d.manual_override=false;d.approved=true;d.status='approved';d.applied=!!d.in_file;n++;}
+  }else if(d.approved){d.approved=false;d.status=unapprovedStatus(d);d.applied=false;n++;}
+});
   if(n)markDirty();render();
-  toast((v?'批准':'取消')+'了 '+n+' 条'+(skipped?`，跳过 ${skipped} 条无名称字段`:''));}
+  toast((v?'采纳建议':'取消批准')+'了 '+n+' 条'+(skipped?`，跳过 ${skipped} 条`:''));}
 document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{
   const k=th.dataset.sort;sortAsc=sortKey===k?!sortAsc:true;sortKey=k;page=0;render();});
 
@@ -936,37 +893,6 @@ async function doSync(){
     else{toast('同步失败: '+(j.error||r.status),'err');}
   }catch(e){toast('同步失败：'+e,'err');}
   finally{btn.disabled=false;}
-}
-
-let _defaults={};
-async function openConfig(){
-  const r=await fetch('/api/defaults');const j=await r.json();
-  if(!r.ok){toast('读取策略失败: '+(j.error||r.status),'err');return;}
-  _defaults=j.defaults||{};
-  const langs=Array.isArray(_defaults.sync_existing_localized)?_defaults.sync_existing_localized:[];
-  document.getElementById('cfgTchinese').checked=langs.includes('tchinese');
-  document.getElementById('cfgSortas').checked=!!_defaults.write_sortas_pinyin;
-  document.getElementById('cfgCreate').checked=!!_defaults.create_missing_localized;
-  document.getElementById('cfgMask').classList.add('show');
-}
-function closeConfig(){document.getElementById('cfgMask').classList.remove('show');}
-async function saveConfig(){
-  const langs=Array.isArray(_defaults.sync_existing_localized)
-    ?[..._defaults.sync_existing_localized]:['schinese','sc_schinese'];
-  const want=document.getElementById('cfgTchinese').checked;
-  const at=langs.indexOf('tchinese');
-  if(want&&at<0)langs.push('tchinese');
-  if(!want&&at>=0)langs.splice(at,1);
-  const body={defaults:{
-    sync_existing_localized:langs,
-    write_sortas_pinyin:document.getElementById('cfgSortas').checked,
-    create_missing_localized:document.getElementById('cfgCreate').checked,
-  }};
-  const r=await fetch('/api/defaults',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)});
-  const j=await readJson(r);if(!j)return;
-  if(r.ok){closeConfig();toast('写入策略已保存','ok');await load(true);}
-  else{toast('保存失败: '+(j.error||r.status),'err');}
 }
 
 function openTasks(){document.getElementById('taskMask').classList.add('show');pollTask();}

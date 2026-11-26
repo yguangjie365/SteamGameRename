@@ -9,7 +9,7 @@ import httpx
 
 import db as dbmod
 from backup import atomic_write
-from rules import CJK
+from vdf import CJK
 
 
 def load_store_cache(path: str | Path) -> dict[int, str]:

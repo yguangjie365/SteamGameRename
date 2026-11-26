@@ -53,7 +53,7 @@ def ensure_config(config_dir: str | Path) -> Path:
     folder = Path(config_dir)
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        for name in ("names.json", "rules.json"):
+        for name in ("names.json",):
             target = folder / name
             if target.exists():
                 continue

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import db as dbmod
 from backup import atomic_write
-from rules import CJK
+from vdf import CJK
 
 FIELDS = (
     "GameID", "OriginalName", "ModifiedName",

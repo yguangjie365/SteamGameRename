@@ -1,6 +1,6 @@
 [project]
 name = "steam-cn-renamer"
-version = "0.6.0"
+version = "0.7.0"
 description = "将 Steam 库游戏名称改为中文的本地工具（appinfo v42）"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -38,7 +38,6 @@ py-modules = [
   "mapping",
   "paths",
   "pinyin",
-  "rules",
   "shard",
   "store",
   "vdf",
@@ -48,7 +47,7 @@ py-modules = [
 # 静态资源安装到 share/，paths.asset_dir() 会回退到这里
 [tool.setuptools.data-files]
 "share/steam-cn-renamer/web" = ["src/web/index.html"]
-"share/steam-cn-renamer/defaults" = ["src/defaults/names.json", "src/defaults/rules.json", "src/defaults/game_names.csv", "src/defaults/original_names.csv"]
+"share/steam-cn-renamer/defaults" = ["src/defaults/names.json", "src/defaults/game_names.csv", "src/defaults/original_names.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

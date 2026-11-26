@@ -31,7 +31,6 @@ os.environ.setdefault("STEAM_CN_ALLOW_NON_WINDOWS", "1")
 from backup import apply_changes, restore_backup  # noqa: E402
 from cli import main  # noqa: E402
 from mapping import build_plan  # noqa: E402
-from rules import apply_rules, load_rules  # noqa: E402
 from shard import (  # noqa: E402
     app_names,
     build_bytes,
@@ -87,45 +86,6 @@ class ShardTests(unittest.TestCase):
 
 
 class HardeningTests(unittest.TestCase):
-    def test_regex_flags_are_applied(self):
-        rules = {
-            "schema_version": 1,
-            "execution": {"order": ["R"], "default_mode": "review"},
-            "rules": {
-                "R": {
-                    "enabled": True,
-                    "mode": "review",
-                    "operations": [
-                        {"pattern": "^abc$", "replacement": "ok", "flags": ["i"]}
-                    ],
-                    "preconditions": {},
-                }
-            },
-        }
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "rules.json"
-            path.write_text(json.dumps(rules), encoding="utf-8")
-            ruleset = load_rules(path)
-        self.assertEqual(apply_rules("ABC", ruleset)[0], "ok")
-
-    def test_unknown_regex_flag_is_rejected(self):
-        rules = {
-            "schema_version": 1,
-            "execution": {"order": ["R"], "default_mode": "review"},
-            "rules": {
-                "R": {
-                    "operations": [
-                        {"pattern": "x", "replacement": "y", "flags": ["q"]}
-                    ]
-                }
-            },
-        }
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "rules.json"
-            path.write_text(json.dumps(rules), encoding="utf-8")
-            with self.assertRaises(Exception):
-                load_rules(path)
-
     def test_build_bytes_rejects_missing_target(self):
         from shard import ShardError
 
@@ -149,13 +109,13 @@ class HardeningTests(unittest.TestCase):
         }
         community = {443510: "社区译名"}
         plan = build_plan(
-            FIXTURES, names, load_rules(CONFIG / "rules.json"),
+            FIXTURES, names,
             include_no_zh=False, community_names=community,
         )
         item = next(p for p in plan if p.appid == 443510)
         self.assertEqual(item.source, "community")
         self.assertEqual(item.desired_name, "社区译名")
-        self.assertEqual(item.status, "candidate")
+        self.assertEqual(item.status, "suggested")
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "community.json"
@@ -193,7 +153,7 @@ class HardeningTests(unittest.TestCase):
             "entries": {},
         }
         plan = build_plan(
-            FIXTURES, names, load_rules(CONFIG / "rules.json"),
+            FIXTURES, names,
             include_no_zh=False, store_cache={443510: "测试中文名"},
         )
         item = next(p for p in plan if p.appid == 443510)
@@ -209,7 +169,6 @@ class HardeningTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp)
-            shutil.copy(CONFIG / "rules.json", config)
             shutil.copy(CONFIG / "names.json", config)
             server = ThreadingHTTPServer(
                 ("127.0.0.1", 0),
@@ -280,26 +239,44 @@ class SafetyTests(unittest.TestCase):
             set_node_text(Node(TYPE_STRING, 0, b"x\x00"), "bad\nname")
 
 
-class RuleTests(unittest.TestCase):
-    def test_documented_examples(self):
-        ruleset = load_rules(CONFIG / "rules.json")
-        cases = [
-            ("暖雪 Warm Snow", "暖雪"),
-            ("异形丛生：虫启天降 (Alien Swarm: Reactive Drop)", "异形丛生：虫启天降"),
-            ("使命召唤®：战争地带™", "使命召唤：战争地带"),
-            (" 霍格沃茨之遗：黑魔法驻军帽", "霍格沃茨之遗：黑魔法驻军帽"),
-            ("《守望先锋》", "守望先锋"),
-            ("《暗黑破坏神 IV：憎恨之躯》", "暗黑破坏神 IV：憎恨之躯"),
-            ("《暗黑破坏神 IV》：“憎恨之王” - 标准版", "暗黑破坏神 IV：“憎恨之王” - 标准版"),
-            ("Hogwarts Legacy", "Hogwarts Legacy"),
-        ]
-        for source, expected in cases:
-            with self.subTest(source=source):
-                actual, _ = apply_rules(source, ruleset)
-                self.assertEqual(actual, expected)
-
-
 class PlanTests(unittest.TestCase):
+    def test_suggestion_is_not_normalized(self):
+        suggestion = "《示例™: 中文版 - Deluxe Edition》"
+        with mock.patch("mapping.resolve_base", return_value=(suggestion, "shared_csv")):
+            plan = build_plan(FIXTURES, {
+                "schema_version": 1, "defaults": {}, "entries": {},
+            })
+        item = next(p for p in plan if p.appid == 443510)
+        self.assertEqual(item.base_name, suggestion)
+        self.assertEqual(item.desired_name, suggestion)
+        self.assertEqual(item.custom_name, "")
+        self.assertEqual(item.status, "suggested")
+        self.assertFalse(item.approved)
+        self.assertNotIn("applied_rules", item.to_dict())
+
+    def test_custom_name_does_not_replace_suggestion(self):
+        suggestion = "《示例™: 中文版 - Deluxe Edition》"
+        names = {
+            "schema_version": 1,
+            "defaults": {"primary_target": "common.name"},
+            "entries": {
+                "443510": {
+                    "manual_override": True,
+                    "desired_name": "我的自定义名称",
+                    "approved": True,
+                    "targets": ["common.name"],
+                }
+            },
+        }
+        with mock.patch("mapping.resolve_base", return_value=(suggestion, "shared_csv")):
+            plan = build_plan(FIXTURES, names)
+        item = next(p for p in plan if p.appid == 443510)
+        self.assertEqual(item.base_name, suggestion)
+        self.assertEqual(item.custom_name, "我的自定义名称")
+        self.assertEqual(item.desired_name, "我的自定义名称")
+        self.assertTrue(item.approved)
+        self.assertTrue(item.manual_override)
+
     def test_manual_override_is_approved(self):
         names = {
             "schema_version": 1,
@@ -316,7 +293,7 @@ class PlanTests(unittest.TestCase):
                 }
             },
         }
-        plan = build_plan(FIXTURES, names, load_rules(CONFIG / "rules.json"))
+        plan = build_plan(FIXTURES, names)
         item = next(p for p in plan if p.appid == 443510)
         self.assertTrue(item.approved)
         self.assertEqual(item.desired_name, "指南按钮和弦")
@@ -393,12 +370,10 @@ class ConfigTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             config = Path(tmp)
-            shutil.copy(CONFIG / "rules.json", config)
             shutil.copy(CONFIG / "names.json", config)
             via_config = plan_from_config(FIXTURES, config, include_no_zh=True)
             direct = build_plan(
                 FIXTURES, load_names(config / "names.json"),
-                load_rules(config / "rules.json"),
                 include_no_zh=True, store_cache={}, community_names={},
             )
         self.assertEqual(len(via_config), len(direct))
@@ -523,22 +498,7 @@ class RobustnessTests(unittest.TestCase):
             "entries": {},
         }
         with self.assertRaises(ValueError):
-            build_plan(FIXTURES, names, load_rules(CONFIG / "rules.json"))
-
-    def test_auto_rule_mode_is_rejected(self):
-        from rules import RulesError
-
-        rules = {
-            "schema_version": 1,
-            "execution": {"order": ["R"], "default_mode": "review"},
-            "rules": {"R": {"mode": "auto",
-                            "operations": [{"pattern": "a", "replacement": "b"}]}},
-        }
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "rules.json"
-            path.write_text(json.dumps(rules), encoding="utf-8")
-            with self.assertRaises(RulesError):
-                load_rules(path)
+            build_plan(FIXTURES, names)
 
     def test_ensure_config_creates_templates(self):
         from cli import ensure_config
@@ -546,7 +506,7 @@ class RobustnessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder = ensure_config(tmp)
             self.assertTrue((folder / "names.json").exists())
-            self.assertTrue((folder / "rules.json").exists())
+            self.assertFalse((folder / "rules.json").exists())
             self.assertEqual(json.loads((folder / "names.json").read_text(encoding="utf-8"))["schema_version"], 1)
 
     def test_update_community_offline_raises_value_error(self):
@@ -574,7 +534,6 @@ class GuiApiTests(unittest.TestCase):
         shutil.copytree(FIXTURES, self.appinfo)
         self.config = root / "config"
         self.config.mkdir()
-        shutil.copy(CONFIG / "rules.json", self.config)
         names = {
             "schema_version": 1,
             "defaults": {
@@ -799,14 +758,13 @@ class SharedNamesTests(unittest.TestCase):
         from game_names import load_shared_names
         from mapping import build_plan
         from paths import asset_dir
-        from rules import load_rules
 
         names = json.loads(
             (ROOT / "src" / "defaults" / "names.json").read_text(encoding="utf-8")
         )
         shared = load_shared_names(asset_dir("defaults") / "game_names.csv")
         plan = build_plan(
-            FIXTURES, names, load_rules(FIXTURE_CONFIG / "rules.json"), shared=shared
+            FIXTURES, names, shared=shared
         )
         row = next(p for p in plan if p.appid == 2342040)
         self.assertEqual(row.source, "shared_csv")
@@ -816,7 +774,6 @@ class SharedNamesTests(unittest.TestCase):
         from game_names import load_shared_names
         from mapping import build_plan
         from paths import asset_dir
-        from rules import load_rules
 
         names = json.loads(
             (ROOT / "src" / "defaults" / "names.json").read_text(encoding="utf-8")
@@ -824,7 +781,7 @@ class SharedNamesTests(unittest.TestCase):
         names["defaults"]["use_shared_names"] = False
         shared = load_shared_names(asset_dir("defaults") / "game_names.csv")
         plan = build_plan(
-            FIXTURES, names, load_rules(FIXTURE_CONFIG / "rules.json"), shared=shared
+            FIXTURES, names, shared=shared
         )
         self.assertFalse(any(p.source == "shared_csv" for p in plan))
 
@@ -914,8 +871,8 @@ def snapshot_from_rows(rows: list[dict]) -> dict:
             row.get("source") or "",
             row.get("original_name") or "",
             row.get("desired_name") or "",
+            row.get("custom_name") or "",
             ",".join(row.get("targets") or []),
-            ",".join(row.get("applied_rules") or []),
         )))
     return {
         "total": len(rows),
@@ -938,7 +895,7 @@ def write_snapshot(data: dict) -> None:
 
 
 HINT = (
-    "计划输出与快照不一致。若为有意改动（新增来源/状态、规则调整），"
+    "计划输出与快照不一致。若为有意改动（新增来源/状态、建议与自定义名称流程调整），"
     "执行 UPDATE_SNAPSHOTS=1 python -m pytest tests -q 重新生成 "
     "tests/snapshots/plan_snapshot.json 并 review diff。"
 )
@@ -961,7 +918,7 @@ class PlanSnapshotTests(unittest.TestCase):
         self.assertEqual(read_snapshot(), actual, HINT)
         # 显式断言一遍关键口径，让失败信息更直白
         self.assertEqual(actual["total"], 5)
-        self.assertEqual(actual["status"], {"approved": 2, "candidate": 1, "no_zh": 2})
+        self.assertEqual(actual["status"], {"approved": 2, "suggested": 1, "no_zh": 2})
 
 
 class PlanApiSnapshotTests(unittest.TestCase):
@@ -1287,39 +1244,6 @@ class BackupNameTests(unittest.TestCase):
             self.assertIn("非法文件名", str(ctx.exception))
 
 
-class RulesOrderTests(unittest.TestCase):
-    def _write(self, tmp: Path, order: list, rules: dict) -> Path:
-        path = tmp / "rules.json"
-        path.write_text(json.dumps({
-            "schema_version": 1,
-            "execution": {"order": order, "default_mode": "review"},
-            "rules": rules,
-        }), encoding="utf-8")
-        return path
-
-    def test_order_with_missing_rule_is_rejected(self):
-        from rules import RulesError, load_rules
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write(Path(tmp), ["A", "MISSING"], {
-                "A": {"operations": [{"pattern": "a", "replacement": "b"}]},
-            })
-            with self.assertRaises(RulesError) as ctx:
-                load_rules(path)
-            self.assertIn("MISSING", str(ctx.exception))
-
-    def test_unused_rule_warns(self):
-        from rules import load_rules
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write(Path(tmp), ["A"], {
-                "A": {"operations": [{"pattern": "a", "replacement": "b"}]},
-                "B": {"operations": [{"pattern": "c", "replacement": "d"}]},
-            })
-            with self.assertWarns(UserWarning):
-                load_rules(path)
-
-
 class SteamOriginalNameTests(unittest.TestCase):
     """台账留存的最初英文名只用于展示，不改变写入/审批口径。"""
 
@@ -1366,7 +1290,6 @@ class SteamOriginalNameTests(unittest.TestCase):
             names = self._names_fixture()
             config = tmp / "config"
             config.mkdir()
-            shutil.copy2(FIXTURES.parent / "config" / "rules.json", config / "rules.json")
             (config / "names.json").write_text(
                 json.dumps(names, ensure_ascii=False), encoding="utf-8"
             )
@@ -1387,7 +1310,6 @@ class SteamOriginalNameTests(unittest.TestCase):
             tmp = Path(tmp)
             config = tmp / "config"
             config.mkdir()
-            shutil.copy2(FIXTURES.parent / "config" / "rules.json", config / "rules.json")
             (config / "names.json").write_text(
                 json.dumps(self._names_fixture(with_record=False), ensure_ascii=False),
                 encoding="utf-8",
@@ -1396,7 +1318,6 @@ class SteamOriginalNameTests(unittest.TestCase):
             plan = mapping.build_plan(
                 self._build_renamed_shard(tmp),
                 mapping.load_names(config / "names.json"),
-                mapping.load_rules(config / "rules.json"),
             )
             row = next(x for x in plan if x.appid == self.APPID)
             self.assertEqual(row.original_name, self.ZH_NAME)
@@ -2395,7 +2316,6 @@ class WebSaveMergeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
-            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
             ledger = {
                 "schema_version": 1, "meta": {}, "defaults": {}, "summary": {},
                 "entries": {"651430": {
@@ -2423,7 +2343,6 @@ class WebSaveMergeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
-            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
             shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
             before = (cfg / "names.json").read_bytes()
             with mock.patch.dict(os.environ, {"STEAM_CN_RENAMER_NO_DB": ""}):
@@ -2448,7 +2367,6 @@ class WebSaveMergeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
-            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
             shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
             before = hashlib.sha256((cfg / "names.json").read_bytes()).hexdigest()
             server = self._serve(cfg)
@@ -2466,10 +2384,42 @@ class WebSaveMergeTests(unittest.TestCase):
                 hashlib.sha256((cfg / "names.json").read_bytes()).hexdigest(), before
             )
 
+    def test_adopted_and_custom_names_survive_reload(self):
+        from mapping import build_plan, load_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
+            with mock.patch.dict(os.environ, {"STEAM_CN_RENAMER_NO_DB": ""}):
+                server = self._serve(cfg)
+                try:
+                    self._call(server, "/api/save", {"entries": [
+                        {"appid": "443510", "desired_name": "采纳的建议名",
+                         "approved": True, "manual_override": False,
+                         "targets": ["common.name"]},
+                        {"appid": "4628710", "desired_name": "我的自定义名",
+                         "approved": True, "manual_override": True,
+                         "targets": ["common.name"]},
+                    ]})
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                ledger = load_names(cfg / "names.json")
+                with mock.patch("mapping.resolve_base", return_value=("当前建议名", "shared_csv")):
+                    plan = build_plan(FIXTURES, ledger, include_no_zh=True)
+            adopted = next(p for p in plan if p.appid == 443510)
+            custom = next(p for p in plan if p.appid == 4628710)
+            self.assertEqual(adopted.base_name, "当前建议名")
+            self.assertEqual(adopted.desired_name, "采纳的建议名")
+            self.assertEqual(adopted.custom_name, "")
+            self.assertEqual(custom.base_name, "当前建议名")
+            self.assertEqual(custom.custom_name, "我的自定义名")
+            self.assertEqual(custom.desired_name, "我的自定义名")
+            self.assertTrue(custom.manual_override)
+
     def test_html_response_has_csp(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
-            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
             shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
             server = self._serve(cfg)
             try:
@@ -2487,7 +2437,6 @@ class WebSaveMergeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
-            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
             shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
             server = self._serve(cfg)
             try:
@@ -2498,21 +2447,18 @@ class WebSaveMergeTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
 
-    def test_mapping_priority_rejects_unknown_source(self):
-        """非法来源写进 defaults 会让 /api/plan 直接报错，必须在保存时拦住。"""
+    def test_defaults_endpoint_is_removed(self):
+        """旧写入策略接口应下线，前端不再暴露规则设置。"""
         import urllib.error
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
-            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
             shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
             server = self._serve(cfg)
             try:
                 with self.assertRaises(urllib.error.HTTPError) as ctx:
-                    self._call(server, "/api/defaults", {
-                        "defaults": {"mapping_priority": ["unknown_source"]}
-                    })
-                self.assertEqual(ctx.exception.code, 400)
+                    self._call(server, "/api/defaults", {"defaults": {}})
+                self.assertEqual(ctx.exception.code, 404)
             finally:
                 server.shutdown()
                 server.server_close()
@@ -2526,7 +2472,6 @@ class WebSaveMergeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
-            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
             shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
             server = self._serve(cfg)
             try:
@@ -2585,7 +2530,6 @@ class ShutdownEndpointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
             shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
-            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
             fired = threading.Event()
             server = self._serve(cfg, fired.set)
             try:
@@ -2600,7 +2544,6 @@ class ShutdownEndpointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
             shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
-            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
             server = self._serve(cfg, None)
             try:
                 payload = self._post(server, "/api/shutdown")
@@ -2611,8 +2554,15 @@ class ShutdownEndpointTests(unittest.TestCase):
                 server.server_close()
 
 
-class WebDefaultsTests(unittest.TestCase):
-    def test_round_trip_and_field_guard(self):
+class WebEditorTests(unittest.TestCase):
+    def test_rule_settings_are_removed_from_page(self):
+        page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
+        for removed in ("写入策略", "规则候选", "命中规则", "/api/defaults", "applied_rules"):
+            self.assertNotIn(removed, page)
+        for expected in ("建议名称", "自定义名称", "adoptRow(", "submitCustom("):
+            self.assertIn(expected, page)
+
+    def test_defaults_endpoint_is_removed(self):
         import threading
         import urllib.error
         import urllib.request
@@ -2624,42 +2574,18 @@ class WebDefaultsTests(unittest.TestCase):
             cfg = Path(tmp) / "config"
             cfg.mkdir()
             shutil.copy(ROOT / "src" / "defaults" / "names.json", cfg / "names.json")
-            shutil.copy(ROOT / "src" / "defaults" / "rules.json", cfg / "rules.json")
             handler = gui.make_handler(tmp, cfg, Path(tmp) / "backups")
             server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             base = f"http://127.0.0.1:{server.server_port}"
-
-            def call(path: str, body: dict | None = None):
-                data = json.dumps(body).encode() if body is not None else None
-                request = urllib.request.Request(
-                    base + path, data=data, method="POST" if data else "GET",
-                    headers={"Content-Type": "application/json"} if data else {},
-                )
-                try:
-                    with urllib.request.urlopen(request, timeout=10) as response:
-                        return response.status, json.loads(response.read())
-                except urllib.error.HTTPError as exc:
-                    return exc.code, json.loads(exc.read())
-
             try:
-                status, payload = call("/api/defaults")
-                self.assertEqual(status, 200)
-                self.assertIn("write_sortas_pinyin", payload["defaults"])
-                status, _ = call("/api/defaults", {"defaults": {
-                    "write_sortas_pinyin": True,
-                    "sync_existing_localized": ["schinese", "tchinese"],
-                }})
-                self.assertEqual(status, 200)
-                status, payload = call("/api/defaults")
-                self.assertTrue(payload["defaults"]["write_sortas_pinyin"])
-                self.assertIn("tchinese", payload["defaults"]["sync_existing_localized"])
-                status, _ = call("/api/defaults", {"defaults": {"entries": {}}})
-                self.assertEqual(status, 400)
-                status, _ = call("/api/defaults", {"defaults": {
-                    "write_sortas_pinyin": "yes"
-                }})
-                self.assertEqual(status, 400)
+                request = urllib.request.Request(
+                    base + "/api/defaults", data=b"{}", method="POST",
+                    headers={"Content-Type": "application/json"},
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(request, timeout=10)
+                self.assertEqual(ctx.exception.code, 404)
             finally:
                 server.shutdown()
                 server.server_close()
