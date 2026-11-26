@@ -2576,6 +2576,14 @@ class WebEditorTests(unittest.TestCase):
         self.assertNotIn("baidu.com/s?wd=", page)
         self.assertNotIn("bing.com/search?q=", page)
 
+    def test_topbar_button_order(self):
+        """标题栏按钮顺序：刷新 → 保存台账 → 应用写入 → 静默同步 → 词库更新 → 退出服务。"""
+        page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
+        bar = page[page.index('<div class="topbar-tools">'):page.index("</div>\n  </div>\n</div>")]
+        labels = ("刷新", "保存台账", "应用写入", "静默同步", "词库更新", "退出服务")
+        positions = [bar.index(f'<span class="btn-label">{label}</span>') for label in labels]
+        self.assertEqual(positions, sorted(positions), f"按钮顺序错误: {list(zip(labels, positions))}")
+
     def test_primary_actions_are_in_topbar(self):
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
         wrap_start = page.index('<div class="wrap">')

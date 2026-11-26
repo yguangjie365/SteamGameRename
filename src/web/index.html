@@ -325,10 +325,10 @@ td.stcell{vertical-align:middle}
     <div class="topbar-tools">
       <span id="steamBadge" class="badge-live connection-status"><span class="dot off"></span>Steam 状态未知</span>
       <span id="taskPing" class="badge-live" hidden title="后台任务进度"><span class="dot on"></span><span id="taskMsg">—</span></span>
-      <button class="btn" id="saveBtn" onclick="save()" title="把当前采纳与自定义名称保存到本地台账"><svg class="icon"><use href="#i-save"/></svg><span class="btn-label">保存台账</span></button>
-      <button class="btn" id="syncBtn" onclick="doSync()" title="只补回 Steam 更新后丢失的已批准名称"><svg class="icon"><use href="#i-sync"/></svg><span class="btn-label">静默同步</span></button>
-      <button class="btn danger" onclick="openApply()" title="确认后写入 Steam 本地缓存"><svg class="icon"><use href="#i-apply"/></svg><span class="btn-label">应用写入</span></button>
       <button class="btn" onclick="load()" title="重新载入台账与 Steam 分片"><svg class="icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新</span></button>
+      <button class="btn" id="saveBtn" onclick="save()" title="把当前采纳与自定义名称保存到本地台账"><svg class="icon"><use href="#i-save"/></svg><span class="btn-label">保存台账</span></button>
+      <button class="btn danger" onclick="openApply()" title="确认后写入 Steam 本地缓存"><svg class="icon"><use href="#i-apply"/></svg><span class="btn-label">应用写入</span></button>
+      <button class="btn" id="syncBtn" onclick="doSync()" title="只补回 Steam 更新后丢失的已批准名称"><svg class="icon"><use href="#i-sync"/></svg><span class="btn-label">静默同步</span></button>
       <button class="btn" id="taskBtn" onclick="openTasks()" title="联网更新社区词库或补全商店中文名"><svg class="icon"><use href="#i-cloud"/></svg><span class="btn-label">词库更新</span></button>
       <button class="btn ghost" id="quitBtn" onclick="quitServer()" title="停止本地服务并退出程序"><svg class="icon"><use href="#i-power"/></svg><span class="btn-label">退出服务</span></button>
     </div>
