@@ -2563,6 +2563,19 @@ class ShutdownEndpointTests(unittest.TestCase):
 
 
 class WebEditorTests(unittest.TestCase):
+    def test_search_uses_ai_modes(self):
+        """行内 🔍 必须打开各引擎的 AI 搜索，而不是普通结果页。"""
+        page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
+        for marker in (
+            "chat.baidu.com/search?word=",      # 百度文心 AI 问答
+            "bing.com/copilotsearch?q=",        # Bing Copilot Search
+            "google.com/search?udm=50&q=",      # Google AI Mode
+        ):
+            self.assertIn(marker, page)
+        # 普通搜索入口不应再出现
+        self.assertNotIn("baidu.com/s?wd=", page)
+        self.assertNotIn("bing.com/search?q=", page)
+
     def test_primary_actions_are_in_topbar(self):
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
         wrap_start = page.index('<div class="wrap">')
