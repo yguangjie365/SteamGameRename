@@ -76,13 +76,7 @@ button,a,input,select{outline-offset:3px}
 .btn.ghost:hover{color:var(--text);border-color:var(--line);background:var(--panel2);transform:none}
 .btn.icon-only{width:34px;padding:0}
 
-.wrap{max-width:1560px;margin:0 auto;padding:26px 28px 36px}
-.workspace-head{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--sp-6);margin-bottom:20px}
-.eyebrow{color:var(--accent);font:650 10px/1.4 var(--font-mono);letter-spacing:1.6px;text-transform:uppercase;margin-bottom:5px}
-.workspace-head h1{margin:0;font-size:24px;line-height:1.25;font-weight:680;letter-spacing:-.5px}
-.workspace-head p{margin:6px 0 0;color:var(--muted);font-size:12.5px}
-.primary-actions{display:flex;align-items:center;gap:9px;padding-bottom:1px}
-.primary-actions .btn{min-height:38px;padding:8px 14px}
+.wrap{max-width:1560px;margin:0 auto;padding:22px 28px 36px}
 
 .stats{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:9px;margin-bottom:18px}
 .card{position:relative;overflow:hidden;display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;
@@ -108,12 +102,6 @@ button,a,input,select{outline-offset:3px}
 
 .library-panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);
   box-shadow:var(--shadow-md),inset 0 1px 0 rgba(255,255,255,.025);overflow:hidden}
-.library-heading{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-4);
-  padding:15px 18px 13px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.018),transparent)}
-.library-heading h2{margin:0;font-size:14px;font-weight:650;letter-spacing:.1px}
-.library-heading p{margin:3px 0 0;color:var(--faint);font-size:11px}
-.local-badge{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:11px;white-space:nowrap}
-.local-badge:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(97,214,139,.1)}
 .filters{display:flex;flex-wrap:wrap;gap:9px;align-items:center;padding:14px 18px 10px}
 .search{position:relative;flex:1 1 300px;min-width:240px;max-width:440px}
 .search input{width:100%;height:36px;padding:8px 12px 8px 36px;border-radius:var(--r-sm);border:1px solid var(--line);
@@ -261,21 +249,16 @@ td.stcell{vertical-align:middle}
 .halt-card p{margin:0;color:var(--muted);line-height:1.75;font-size:13px}
 
 @media (max-width:1080px){
-  .topbar-inner{padding:0 20px}
+  .topbar-inner{padding:10px 20px;flex-wrap:wrap;gap:9px}
+  .topbar-tools{flex-wrap:wrap;justify-content:flex-end}
   .wrap{padding:22px 20px 30px}
   .stats{grid-template-columns:repeat(4,minmax(0,1fr))}
-  .workspace-head h1{font-size:22px}
-  .library-heading{padding-left:15px;padding-right:15px}
   .filters,.actions{padding-left:15px;padding-right:15px}
   .pager{padding-left:15px;padding-right:15px}
 }
 @media (max-width:860px){
-  .topbar-inner{flex-wrap:wrap;gap:9px;padding-top:10px;padding-bottom:10px}
-  .topbar-tools{margin-left:auto}
+  .topbar-tools{width:100%;margin-left:0}
   .connection-status{order:3}
-  .workspace-head{align-items:flex-start;flex-direction:column;gap:16px}
-  .primary-actions{width:100%}
-  .primary-actions .btn{flex:1}
   .summary{flex:1 1 100%;margin-right:0}
   .chips{width:100%}
 }
@@ -291,7 +274,6 @@ td.stcell{vertical-align:middle}
   .topbar-tools .icon{width:15px;height:15px;flex-basis:15px}
   .badge-live{font-size:10.5px;padding:5px 8px}
   .library-panel{overflow:visible}
-  .library-heading{border-radius:16px 16px 0 0}
   .filters{gap:8px}
   .search{flex:1 1 100%;min-width:0;max-width:none}
   .filters select{flex:1 1 calc(50% - 8px)}
@@ -314,19 +296,12 @@ td.stcell{vertical-align:middle}
   .topbar-tools{width:100%;margin-left:0;justify-content:space-between}
   .connection-status{margin-right:auto}
   .ver{font-size:9px}
-  .workspace-head h1{font-size:20px}
-  .workspace-head p{font-size:11.5px}
-  .primary-actions{gap:6px}
-  .primary-actions .btn{padding:7px 9px;font-size:11.5px}
-  .primary-actions .icon{display:none}
   .stats{gap:7px;margin-bottom:14px}
   .card{padding:10px 11px}
   .card .hint{display:none}
   .filters,.actions{padding-left:12px;padding-right:12px}
   .chips{display:grid;grid-template-columns:1fr 1fr}
   .chip{justify-content:center;padding:5px 7px;font-size:11px}
-  .library-heading{padding-left:12px;padding-right:12px}
-  .local-badge{font-size:10px}
   .modal{padding:22px}
 }
 @media (prefers-reduced-motion:reduce){
@@ -350,6 +325,9 @@ td.stcell{vertical-align:middle}
     <div class="topbar-tools">
       <span id="steamBadge" class="badge-live connection-status"><span class="dot off"></span>Steam 状态未知</span>
       <span id="taskPing" class="badge-live" hidden title="后台任务进度"><span class="dot on"></span><span id="taskMsg">—</span></span>
+      <button class="btn" id="saveBtn" onclick="save()" title="把当前采纳与自定义名称保存到本地台账"><svg class="icon"><use href="#i-save"/></svg><span class="btn-label">保存台账</span></button>
+      <button class="btn" id="syncBtn" onclick="doSync()" title="只补回 Steam 更新后丢失的已批准名称"><svg class="icon"><use href="#i-sync"/></svg><span class="btn-label">静默同步</span></button>
+      <button class="btn danger" onclick="openApply()" title="确认后写入 Steam 本地缓存"><svg class="icon"><use href="#i-apply"/></svg><span class="btn-label">应用写入</span></button>
       <button class="btn" onclick="load()" title="重新载入台账与 Steam 分片"><svg class="icon"><use href="#i-refresh"/></svg><span class="btn-label">刷新</span></button>
       <button class="btn" id="taskBtn" onclick="openTasks()" title="联网更新社区词库或补全商店中文名"><svg class="icon"><use href="#i-cloud"/></svg><span class="btn-label">词库更新</span></button>
       <button class="btn ghost" id="quitBtn" onclick="quitServer()" title="停止本地服务并退出程序"><svg class="icon"><use href="#i-power"/></svg><span class="btn-label">退出服务</span></button>
@@ -358,19 +336,6 @@ td.stcell{vertical-align:middle}
 </div>
 
 <div class="wrap">
-  <section class="workspace-head">
-    <div>
-      <div class="eyebrow">Local library workspace</div>
-      <h1>名称编辑工作台</h1>
-      <p>审核中文名称，确认后再写入 Steam 本地缓存。</p>
-    </div>
-    <div class="primary-actions">
-      <button class="btn" id="saveBtn" onclick="save()"><svg class="icon"><use href="#i-save"/></svg><span class="btn-label">保存台账</span></button>
-      <button class="btn" id="syncBtn" onclick="doSync()" title="只补回 Steam 更新后丢失的已批准名称"><svg class="icon"><use href="#i-sync"/></svg><span>静默同步</span></button>
-      <button class="btn danger" onclick="openApply()"><svg class="icon"><use href="#i-apply"/></svg><span>应用写入</span></button>
-    </div>
-  </section>
-
   <div class="stats">
     <button type="button" class="card m" onclick="filterStatus('')">
       <span class="k">本类条目</span><span class="v num" id="sTotal">—</span><span class="hint">当前类型</span>
@@ -399,10 +364,6 @@ td.stcell{vertical-align:middle}
   </div>
 
   <section class="library-panel">
-    <div class="library-heading">
-      <div><h2>名称清单</h2><p>采纳建议名称，或输入自定义名称后提交；保存台账不会直接写入 Steam</p></div>
-      <span class="local-badge">数据仅在本机处理</span>
-    </div>
     <div class="filters">
       <div class="search"><input id="q" placeholder="搜索 AppID / 游戏名 / 中文名" oninput="onSearch()"></div>
       <select id="typeFilter" onchange="render()" aria-label="类型筛选">

@@ -10,4 +10,3 @@ include "安装依赖.bat"
 recursive-include src *.py
 recursive-include src/web *.html
 recursive-include src/defaults *.json *.csv
-recursive-include config *.json *.txt

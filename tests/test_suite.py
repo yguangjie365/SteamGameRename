@@ -365,6 +365,14 @@ class ConfigTests(unittest.TestCase):
         actual = {p.stem for p in (ROOT / "src").glob("*.py")}
         self.assertEqual(actual - listed, set(), "src 下有模块未列入 py-modules")
 
+    def test_source_distribution_excludes_runtime_data(self):
+        manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+        for line in manifest.splitlines():
+            directive = line.strip()
+            if directive and not directive.startswith("#"):
+                self.assertNotIn("config", directive.lower())
+                self.assertNotIn("launcher.json", directive.lower())
+
     def test_plan_from_config_matches_build_plan(self):
         from mapping import plan_from_config, build_plan, load_names
 
@@ -2555,6 +2563,17 @@ class ShutdownEndpointTests(unittest.TestCase):
 
 
 class WebEditorTests(unittest.TestCase):
+    def test_primary_actions_are_in_topbar(self):
+        page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
+        wrap_start = page.index('<div class="wrap">')
+        for action in ('id="saveBtn"', 'id="syncBtn"', 'onclick="openApply()"'):
+            self.assertLess(page.index(action), wrap_start)
+        for removed in (
+            "名称编辑工作台", "名称清单", "数据仅在本机处理",
+            "workspace-head", "library-heading", "primary-actions",
+        ):
+            self.assertNotIn(removed, page)
+
     def test_rule_settings_are_removed_from_page(self):
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
         for removed in ("写入策略", "规则候选", "命中规则", "/api/defaults", "applied_rules"):
