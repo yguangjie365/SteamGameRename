@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from dataclasses import dataclass, field
@@ -179,67 +180,62 @@ def _validate_ledger(data: dict, label: str) -> dict:
     return normalized
 
 
+def _db_disabled() -> bool:
+    return bool(os.environ.get("STEAM_CN_RENAMER_NO_DB"))
+
+
+def _ledger_connection(path: Path):
+    conn = dbmod.connect(dbmod.db_path(path.parent))
+    if not dbmod.ledger_ready(conn):
+        conn.close()
+        dbmod.ensure_db(path.parent, ledger_validator=_validate_ledger)
+        conn = dbmod.connect(dbmod.db_path(path.parent))
+    return conn
+
+
 def load_names(path: str | Path) -> dict:
-    """Read the ledger: JSON first, SQLite as disaster recovery.
-
-    Measured on 803/3000/8000 entries, JSON is faster at *every* size
-    (7.2/26.5/80.3 ms vs 15.5/45.6/117.7 ms) because the ledger is always
-    loaded in full — sqlite3 has to build every row as Python objects, while
-    json.loads is C. The db still receives every save, so deleting or corrupting
-    names.json degrades to "recover from db" instead of "lose the ledger".
-
-    A ledger that parses as JSON but fails validation must NOT silently fall back
-    to the db: that would make a user's hand-edit look like it never happened.
-    """
+    """Read the ledger from SQLite; legacy JSON is migration input only."""
     source = Path(path)
-    db_file = dbmod.db_path(source.parent)
-    try:
-        text = source.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:
-        if db_file.exists():
-            recovered = _read_ledger_from_db(db_file)
-            if recovered is not None:
-                return recovered
-        raise FileNotFoundError(
-            f"找不到台账文件 {source}；请确认 --config-dir 指向包含 names.json 的目录"
-        ) from exc
-    except OSError as exc:
-        raise FileNotFoundError(f"无法读取台账 {source}: {exc}") from exc
+    if _db_disabled():
+        try:
+            text = source.read_text(encoding="utf-8")
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"找不到台账文件 {source}；请确认 --config-dir 指向包含 names.json 的目录"
+            ) from exc
+        except OSError as exc:
+            raise FileNotFoundError(f"无法读取台账 {source}: {exc}") from exc
+        return _validate_ledger(json.loads(text), "names.json")
 
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        # 文件损坏 → 用库里的副本救回来，别让玩家丢掉所有已批准译名
-        if db_file.exists():
-            recovered = _read_ledger_from_db(db_file)
-            if recovered is not None:
-                return recovered
-        raise
-    return _validate_ledger(data, "names.json")
-
-
-def _read_ledger_from_db(db_file: Path) -> dict | None:
-    conn = dbmod.connect(db_file)
+    conn = _ledger_connection(source)
     try:
         data = dbmod.read_ledger(conn)
     finally:
         conn.close()
-    if not (data.get("entries") or data.get("defaults")):
-        return None
-    return _validate_ledger(data, str(db_file))
+    return _validate_ledger(data, str(dbmod.db_path(source.parent)))
 
 
 def save_names(data: dict, path: str | Path) -> None:
-    """Write the ledger to SQLite (if present) and refresh the JSON mirror."""
+    """Validate and save the ledger to SQLite without writing a JSON mirror."""
     target = Path(path)
-    db_file = dbmod.db_path(target.parent)
-    if db_file.exists():
-        conn = dbmod.connect(db_file)
-        try:
-            dbmod.write_ledger(conn, data)
-        finally:
-            conn.close()
-    payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    normalized = _validate_ledger(data, str(target))
+    if _db_disabled():
+        payload = json.dumps(normalized, ensure_ascii=False, indent=2) + "\n"
+        atomic_write(target, payload.encode("utf-8"))
+        return
+
+    conn = _ledger_connection(target)
+    try:
+        dbmod.write_ledger(conn, normalized)
+    finally:
+        conn.close()
+
+
+def export_names_json(data: dict, path: str | Path) -> None:
+    """Explicitly export the current SQLite ledger as a readable JSON backup."""
+    target = Path(path)
+    normalized = _validate_ledger(data, str(target))
+    payload = json.dumps(normalized, ensure_ascii=False, indent=2) + "\n"
     atomic_write(target, payload.encode("utf-8"))
 
 

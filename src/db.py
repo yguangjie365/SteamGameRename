@@ -1,25 +1,23 @@
-"""Single-file SQLite store for the ledger and dictionaries.
+"""SQLite source of truth for the ledger and dictionaries.
 
-Design: the database is the runtime source of truth once it exists; the JSON
-and CSV files become mirrors/exchange formats. `renamer.db` lives next to
-names.json, so every existing loader only needs `path.parent` to find it and
-all public signatures stay unchanged.
-
-Safety:
-* Migration is idempotent and only runs when the db file is absent or empty.
-* JSON is rewritten as a mirror on every ledger save, so a user can always
-  read, diff or hand-edit it, and roll back by deleting the db file.
-* Anyone who wants the pre-SQLite behaviour just deletes renamer.db.
+`renamer.db` is authoritative at runtime. Legacy JSON files are imported once,
+backed up under `migration-backups/`, and then ignored by normal reads. CSV
+files remain explicit import/export or override layers.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
 DB_NAME = "renamer.db"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+LEDGER_MIGRATED_KEY = "ledger_migrated"
+COMMUNITY_MIGRATED_KEY = "community_migrated"
 
 _LEDGER_FIELDS = (
     "shard", "original_name", "original_localized", "base_name", "desired_name",
@@ -87,10 +85,21 @@ def db_path(config_dir: str | Path) -> Path:
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path), timeout=10)
+    target = Path(path)
+    migration_backups = target.parent / "migration-backups"
+    if (
+        (not target.exists() or target.stat().st_size == 0)
+        and migration_backups.exists()
+        and any(migration_backups.iterdir())
+    ):
+        raise ValueError(
+            "检测到迁移备份，但 renamer.db 不存在或为空；为避免重新导入过期 JSON，"
+            "请从 migration-backups 恢复数据库，或确认后手工移走旧迁移备份"
+        )
+    conn = sqlite3.connect(str(target), timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA synchronous=FULL")
     # 只有库还没建表时才执行 schema：executescript 每次约 5ms，而 replan 会多次
     # connect，热路径上这笔开销比它守护的东西还贵。
     try:
@@ -395,34 +404,132 @@ def read_shared_names(conn: sqlite3.Connection):
 
 # ---------------------------------------------------------------- migration
 
-def migrate_from_files(
-    conn: sqlite3.Connection, config_dir: Path, defaults_dir: Path | None = None
-) -> dict[str, int]:
-    """Import whatever files exist. Returns per-source row counts."""
-    stats: dict[str, int] = {}
+def ledger_ready(conn: sqlite3.Connection) -> bool:
+    return _get_meta(conn, LEDGER_MIGRATED_KEY) == "1"
 
+
+def community_ready(conn: sqlite3.Connection) -> bool:
+    return _get_meta(conn, COMMUNITY_MIGRATED_KEY) == "1"
+
+
+def _backup_dir(config_dir: Path) -> Path:
+    folder = config_dir / "migration-backups"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _backup_file(path: Path, config_dir: Path) -> Path:
+    stamp = f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns()}"
+    destination = _backup_dir(config_dir) / f"{path.name}.pre-sqlite-{stamp}.bak"
+    shutil.copy2(path, destination)
+    return destination
+
+
+def _backup_database(conn: sqlite3.Connection, config_dir: Path) -> Path:
+    stamp = f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns()}"
+    destination = _backup_dir(config_dir) / f"renamer.pre-sqlite-{stamp}.db"
+    target = sqlite3.connect(str(destination))
+    try:
+        conn.backup(target)
+    finally:
+        target.close()
+    return destination
+
+
+def _migrate_ledger_source(
+    conn: sqlite3.Connection, config_dir: Path, ledger_validator=None
+) -> None:
+    """Switch legacy JSON/DB mirrors to SQLite authority exactly once.
+
+    The old runtime read JSON first, so JSON wins a one-time conflict. Both
+    sides are backed up before reconciliation; later JSON edits are ignored.
+    """
+    if ledger_ready(conn):
+        return
     names_path = config_dir / "names.json"
+    json_data: dict | None = None
+    json_error: Exception | None = None
+    raw_hash = ""
     if names_path.exists():
-        data = json.loads(names_path.read_text(encoding="utf-8"))
-        write_ledger(conn, data)
-        stats["ledger"] = len(data.get("entries") or {})
+        raw = names_path.read_bytes()
+        raw_hash = hashlib.sha256(raw).hexdigest()
+        try:
+            loaded = json.loads(raw.decode("utf-8"))
+            if isinstance(loaded, dict):
+                json_data = loaded
+            else:
+                raise ValueError("names.json 顶层必须是对象")
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            json_error = exc
 
-    community_path = config_dir / "community_names.json"
-    if community_path.exists():
-        payload = json.loads(community_path.read_text(encoding="utf-8"))
-        games = payload.get("games") if isinstance(payload, dict) else None
-        if isinstance(games, dict):
-            names = {}
-            for appid, value in games.items():
-                if not str(appid).isdigit():
-                    continue
-                if isinstance(value, dict):
-                    value = value.get("name")
-                if value:
-                    names[int(appid)] = str(value)
+    stored = read_ledger(conn)
+    db_has_data = bool(
+        stored.get("entries") or stored.get("meta") or stored.get("defaults")
+        or stored.get("summary")
+    )
+    if json_data is not None:
+        if ledger_validator is not None:
+            json_data = ledger_validator(json_data, str(names_path))
+        _backup_file(names_path, config_dir)
+        if db_has_data:
+            _backup_database(conn, config_dir)
+        if json_data != stored or not db_has_data:
+            write_ledger(conn, json_data)
+    elif json_error is not None:
+        if names_path.exists():
+            _backup_file(names_path, config_dir)
+        if not db_has_data:
+            raise ValueError(f"names.json 损坏且 SQLite 无可用台账: {json_error}")
+        _backup_database(conn, config_dir)
+    elif db_has_data:
+        _backup_database(conn, config_dir)
+
+    _set_meta(conn, LEDGER_MIGRATED_KEY, "1")
+    _set_meta(conn, "ledger_json_sha256", raw_hash)
+    conn.commit()
+
+
+def _community_from_json(path: Path) -> dict[int, str]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    games = payload.get("games") if isinstance(payload, dict) else None
+    if not isinstance(games, dict):
+        return {}
+    names: dict[int, str] = {}
+    for appid, value in games.items():
+        if not str(appid).isdigit():
+            continue
+        if isinstance(value, dict):
+            value = value.get("name")
+        if isinstance(value, str) and value.strip():
+            names[int(appid)] = value.strip()
+    return names
+
+
+def _migrate_community_source(conn: sqlite3.Connection, config_dir: Path) -> None:
+    if community_ready(conn):
+        return
+    source = config_dir / "community_names.json"
+    stored = read_community(conn)
+    if source.exists():
+        _backup_file(source, config_dir)
+        if not stored:
+            names = _community_from_json(source)
             if names:
                 write_community(conn, names)
-                stats["community"] = len(names)
+    _set_meta(conn, COMMUNITY_MIGRATED_KEY, "1")
+    conn.commit()
+
+
+def migrate_from_files(
+    conn: sqlite3.Connection, config_dir: Path, defaults_dir: Path | None = None,
+    ledger_validator=None,
+) -> dict[str, int]:
+    """Import legacy files once. Returns per-source row counts."""
+    stats: dict[str, int] = {}
+    _migrate_ledger_source(conn, config_dir, ledger_validator)
+    stats["ledger"] = len(read_ledger(conn).get("entries") or {})
+    _migrate_community_source(conn, config_dir)
+    stats["community"] = len(read_community(conn))
 
     store_path = config_dir / "store_cache.json"
     if store_path.exists():
@@ -522,18 +629,24 @@ def _refresh_shared(
     sync_shared_from_files(conn, baseline, config_dir / "game_names.csv")
 
 
-def ensure_db(config_dir: str | Path, defaults_dir: str | Path | None = None) -> Path:
-    """Create and migrate the db if missing. Idempotent; safe to call often."""
+def ensure_db(
+    config_dir: str | Path, defaults_dir: str | Path | None = None,
+    ledger_validator=None,
+) -> Path:
+    """Create/migrate the database and make SQLite authoritative."""
     folder = Path(config_dir)
     target = db_path(folder)
-    fresh = not target.exists()
+    fresh = not target.exists() or target.stat().st_size == 0
     conn = connect(target)
     try:
         if fresh:
             migrate_from_files(
-                conn, folder, Path(defaults_dir) if defaults_dir else None
+                conn, folder, Path(defaults_dir) if defaults_dir else None,
+                ledger_validator,
             )
         else:
+            _migrate_ledger_source(conn, folder, ledger_validator)
+            _migrate_community_source(conn, folder)
             # 基线表跟随随包 CSV 更新（新版本带来更多英文原名 / 共享词库）
             target_defaults = Path(defaults_dir) if defaults_dir else None
             _refresh_baseline(conn, target_defaults)

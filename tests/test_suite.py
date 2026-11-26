@@ -8,12 +8,14 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import threading
 import time
 import unittest
 from collections import Counter
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +24,7 @@ sys.path.insert(0, str(ROOT))  # run.py / run_desktop.py 位于项目根
 
 # 测试保持纯 JSON/CSV 路径：否则 ensure_config 会在 fixtures 目录建 renamer.db，
 # 污染只读样例并让后续用例走另一条分支。SQLite 由 DbStorageTests 显式覆盖。
-os.environ["STEAM_CN_RENAMER_NO_DB"] = "1"
+os.environ.setdefault("STEAM_CN_RENAMER_NO_DB", "1")
 # 写入路径在非 Windows 上默认拒绝（无 tasklist 会 fail-open）；测试需要放行。
 os.environ.setdefault("STEAM_CN_ALLOW_NON_WINDOWS", "1")
 
@@ -1780,7 +1782,12 @@ class ShardCacheTests(unittest.TestCase):
 
 
 class SqliteStorageTests(unittest.TestCase):
-    """SQLite 是运行期真相源，JSON 是镜像；db 缺失时必须无缝回退。"""
+    """SQLite is authoritative; JSON is migration input and explicit export."""
+
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ, {"STEAM_CN_RENAMER_NO_DB": ""})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _ledger(self):
         return {
@@ -1803,12 +1810,14 @@ class SqliteStorageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
             data = self._ledger()
-            save_names(data, cfg / "names.json")  # 建 JSON（此时无 db）
+            save_names(data, cfg / "names.json")
+            self.assertTrue((cfg / "renamer.db").exists())
+            self.assertFalse((cfg / "names.json").exists())
             before = load_names(cfg / "names.json")
             self.assertEqual(before["entries"]["651430"]["desired_name"], "铁拳7")
 
             dbmod.ensure_db(cfg, ROOT / "src" / "defaults")
-            after = load_names(cfg / "names.json")  # 现在走 db
+            after = load_names(cfg / "names.json")
             self.assertEqual(before["entries"], after["entries"])
             self.assertEqual(before["defaults"], after["defaults"])
             self.assertEqual(
@@ -1831,7 +1840,7 @@ class SqliteStorageTests(unittest.TestCase):
             finally:
                 conn.close()
 
-    def test_save_updates_db_and_json_mirror(self):
+    def test_save_updates_db_without_json_mirror(self):
         import db as dbmod
         from mapping import load_names, save_names
 
@@ -1844,7 +1853,7 @@ class SqliteStorageTests(unittest.TestCase):
                 conn.close()
 
             data = load_names(cfg / "names.json")
-            data["entries"]["651430"]["note"] = "镜像同步检查"
+            data["entries"]["651430"]["note"] = "数据库唯一事实源"
             save_names(data, cfg / "names.json")
 
             conn = dbmod.connect(cfg / "renamer.db")
@@ -1852,25 +1861,22 @@ class SqliteStorageTests(unittest.TestCase):
                 stored = dbmod.read_ledger(conn)
             finally:
                 conn.close()
-            self.assertEqual(stored["entries"]["651430"]["note"], "镜像同步检查")
+            self.assertEqual(stored["entries"]["651430"]["note"], "数据库唯一事实源")
+            self.assertFalse((cfg / "names.json").exists())
 
-            mirror = json.loads((cfg / "names.json").read_text(encoding="utf-8"))
-            self.assertEqual(mirror["entries"]["651430"]["note"], "镜像同步检查")
-
-    def test_corrupt_json_recovers_from_db(self):
+    def test_corrupt_json_is_ignored_after_migration(self):
         import db as dbmod
         from mapping import load_names, save_names
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
             save_names(self._ledger(), cfg / "names.json")
-            dbmod.ensure_db(cfg, None)  # 从 names.json 迁移进 ledger 表
+            dbmod.ensure_db(cfg, None)
             (cfg / "names.json").write_text("{ not valid json", encoding="utf-8")
             recovered = load_names(cfg / "names.json")
-            self.assertEqual(len(recovered["entries"]), 1, "JSON 损坏必须能从 db 救回")
+            self.assertEqual(len(recovered["entries"]), 1)
 
-    def test_invalid_ledger_does_not_fall_back_to_db(self):
-        """校验失败必须报错：静默回退会让用户的手改看起来没生效。"""
+    def test_json_edits_are_ignored_after_migration(self):
         import db as dbmod
         from mapping import load_names, save_names
 
@@ -1883,8 +1889,225 @@ class SqliteStorageTests(unittest.TestCase):
             (cfg / "names.json").write_text(
                 json.dumps(broken, ensure_ascii=False), encoding="utf-8"
             )
+            loaded = load_names(cfg / "names.json")
+            self.assertEqual(loaded["entries"]["651430"]["targets"], ["common.name"])
+
+    def test_migration_conflict_prefers_json_and_backs_up_both(self):
+        import db as dbmod
+        from mapping import load_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            json_data = self._ledger()
+            json_data["entries"]["651430"]["note"] = "JSON 版本"
+            (cfg / "names.json").write_text(
+                json.dumps(json_data, ensure_ascii=False), encoding="utf-8"
+            )
+            db_data = self._ledger()
+            db_data["entries"]["651430"]["note"] = "旧 DB 版本"
+            conn = dbmod.connect(cfg / "renamer.db")
+            try:
+                dbmod.write_ledger(conn, db_data)
+            finally:
+                conn.close()
+
+            dbmod.ensure_db(cfg, None)
+            loaded = load_names(cfg / "names.json")
+            self.assertEqual(loaded["entries"]["651430"]["note"], "JSON 版本")
+            backups = list((cfg / "migration-backups").iterdir())
+            self.assertTrue(any(p.name.startswith("names.json.pre-sqlite") for p in backups))
+            self.assertTrue(any(p.name.startswith("renamer.pre-sqlite") for p in backups))
+
+            edited = self._ledger()
+            edited["entries"]["651430"]["note"] = "迁移后手改 JSON"
+            (cfg / "names.json").write_text(
+                json.dumps(edited, ensure_ascii=False), encoding="utf-8"
+            )
+            self.assertEqual(
+                load_names(cfg / "names.json")["entries"]["651430"]["note"],
+                "JSON 版本",
+            )
+
+    def test_invalid_legacy_json_is_not_marked_migrated(self):
+        import db as dbmod
+        from mapping import load_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            source = cfg / "names.json"
+            broken = self._ledger()
+            broken["entries"]["651430"]["desired_name"] = 123
+            source.write_text(
+                json.dumps(broken, ensure_ascii=False), encoding="utf-8"
+            )
             with self.assertRaises(ValueError):
-                load_names(cfg / "names.json")
+                load_names(source)
+            conn = dbmod.connect(cfg / "renamer.db")
+            try:
+                self.assertFalse(dbmod.ledger_ready(conn))
+            finally:
+                conn.close()
+
+            source.write_text(
+                json.dumps(self._ledger(), ensure_ascii=False), encoding="utf-8"
+            )
+            self.assertEqual(
+                load_names(source)["entries"]["651430"]["desired_name"], "铁拳7"
+            )
+
+    def test_missing_db_does_not_resurrect_stale_json(self):
+        import db as dbmod
+        from mapping import load_names, save_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            source = cfg / "names.json"
+            source.write_text(
+                json.dumps(self._ledger(), ensure_ascii=False), encoding="utf-8"
+            )
+            dbmod.ensure_db(cfg, None)
+            data = load_names(source)
+            data["entries"]["651430"]["note"] = "SQLite 中新数据"
+            save_names(data, source)
+            (cfg / "renamer.db").unlink()
+
+            with self.assertRaisesRegex(ValueError, "migration-backups"):
+                load_names(source)
+            self.assertFalse((cfg / "renamer.db").exists())
+
+    def test_invalid_save_is_rejected_without_changing_db(self):
+        from mapping import load_names, save_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            save_names(self._ledger(), cfg / "names.json")
+            broken = self._ledger()
+            broken["entries"]["651430"]["desired_name"] = 123
+            with self.assertRaises(ValueError):
+                save_names(broken, cfg / "names.json")
+            self.assertEqual(
+                load_names(cfg / "names.json")["entries"]["651430"]["desired_name"],
+                "铁拳7",
+            )
+
+    def test_explicit_json_export_uses_sqlite_data(self):
+        from mapping import export_names_json, load_names, save_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            save_names(self._ledger(), cfg / "names.json")
+            data = load_names(cfg / "names.json")
+            data["entries"]["651430"]["note"] = "导出备份"
+            save_names(data, cfg / "names.json")
+            exported = cfg / "export.json"
+            export_names_json(load_names(cfg / "names.json"), exported)
+            self.assertEqual(
+                json.loads(exported.read_text(encoding="utf-8"))["entries"]["651430"]["note"],
+                "导出备份",
+            )
+
+    def test_export_ledger_command_reads_sqlite_and_refuses_overwrite(self):
+        from cli import main
+        from mapping import load_names, save_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            save_names(self._ledger(), cfg / "names.json")
+            dest = cfg / "ledger-export.json"
+            args = ["--config-dir", str(cfg), "export-ledger", "-o", str(dest)]
+            self.assertEqual(main(args), 0)
+            exported = json.loads(dest.read_text(encoding="utf-8"))
+            self.assertEqual(exported, load_names(cfg / "names.json"))
+            self.assertNotEqual(main(args), 0)
+
+    def test_community_update_replaces_table_in_transaction(self):
+        import db as dbmod
+        from community import update_community_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            dbmod.ensure_db(cfg, None)
+            conn = dbmod.connect(cfg / "renamer.db")
+            try:
+                dbmod.write_community(conn, {9: "旧词条"})
+            finally:
+                conn.close()
+
+            response = mock.Mock()
+            response.json.return_value = {
+                "schemaVersion": 1, "games": {"1": "新一", "2": "新二"},
+            }
+            with mock.patch("community.httpx.get", return_value=response):
+                count = update_community_names(cfg / "community_names.json")
+            self.assertEqual(count, 2)
+            self.assertFalse((cfg / "community_names.json").exists())
+
+            conn = dbmod.connect(cfg / "renamer.db")
+            try:
+                self.assertEqual(dbmod.read_community(conn), {1: "新一", 2: "新二"})
+            finally:
+                conn.close()
+
+            response.json.return_value = {
+                "schemaVersion": 1, "games": {"3": "第三条"},
+            }
+            with mock.patch("community.httpx.get", return_value=response):
+                update_community_names(cfg / "community_names.json")
+            conn = dbmod.connect(cfg / "renamer.db")
+            try:
+                self.assertEqual(dbmod.read_community(conn), {3: "第三条"})
+            finally:
+                conn.close()
+
+    def test_community_update_failure_rolls_back(self):
+        import db as dbmod
+        from community import update_community_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            dbmod.ensure_db(cfg, None)
+            conn = dbmod.connect(cfg / "renamer.db")
+            try:
+                dbmod.write_community(conn, {9: "必须保留"})
+                conn.execute(
+                    "CREATE TRIGGER fail_community_insert BEFORE INSERT ON community "
+                    "WHEN NEW.appid=2 BEGIN SELECT RAISE(ABORT, 'forced failure'); END"
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            response = mock.Mock()
+            response.json.return_value = {
+                "schemaVersion": 1, "games": {"1": "新一", "2": "失败二"},
+            }
+            with mock.patch("community.httpx.get", return_value=response):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    update_community_names(cfg / "community_names.json")
+
+            conn = dbmod.connect(cfg / "renamer.db")
+            try:
+                self.assertEqual(dbmod.read_community(conn), {9: "必须保留"})
+            finally:
+                conn.close()
+
+    def test_community_json_edits_are_ignored_after_migration(self):
+        import db as dbmod
+        from community import load_community_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            source = cfg / "community_names.json"
+            source.write_text(
+                json.dumps({"schemaVersion": 1, "games": {"1": "迁移值"}}),
+                encoding="utf-8",
+            )
+            dbmod.ensure_db(cfg, None)
+            source.write_text(
+                json.dumps({"schemaVersion": 1, "games": {"2": "迁移后手改"}}),
+                encoding="utf-8",
+            )
+            self.assertEqual(load_community_names(source), {1: "迁移值"})
 
     def test_shared_names_roundtrip_through_db(self):
         import db as dbmod
@@ -2194,6 +2417,54 @@ class WebSaveMergeTests(unittest.TestCase):
             saved = load_names(cfg / "names.json")["entries"]["651430"]
             self.assertEqual(saved.get("custom_note"), "我自己加的备注")
             self.assertEqual(saved["desired_name"], "铁拳7")
+
+    def test_api_save_writes_sqlite_only(self):
+        from mapping import load_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
+            shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
+            before = (cfg / "names.json").read_bytes()
+            with mock.patch.dict(os.environ, {"STEAM_CN_RENAMER_NO_DB": ""}):
+                server = self._serve(cfg)
+                try:
+                    self._call(server, "/api/save", {"entries": [{
+                        "appid": "651430", "desired_name": "数据库保存名",
+                        "approved": True, "targets": ["common.name"],
+                    }]})
+                finally:
+                    server.shutdown()
+                    server.server_close()
+                self.assertTrue((cfg / "renamer.db").exists())
+                self.assertEqual((cfg / "names.json").read_bytes(), before)
+                self.assertEqual(
+                    load_names(cfg / "names.json")["entries"]["651430"]["desired_name"],
+                    "数据库保存名",
+                )
+
+    def test_non_string_desired_name_is_rejected(self):
+        import urllib.error
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            shutil.copy(FIXTURE_CONFIG / "rules.json", cfg / "rules.json")
+            shutil.copy(FIXTURE_CONFIG / "names.json", cfg / "names.json")
+            before = hashlib.sha256((cfg / "names.json").read_bytes()).hexdigest()
+            server = self._serve(cfg)
+            try:
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    self._call(server, "/api/save", {"entries": [{
+                        "appid": "651430", "desired_name": 123,
+                        "approved": True, "targets": ["common.name"],
+                    }]})
+                self.assertEqual(ctx.exception.code, 400)
+            finally:
+                server.shutdown()
+                server.server_close()
+            self.assertEqual(
+                hashlib.sha256((cfg / "names.json").read_bytes()).hexdigest(), before
+            )
 
     def test_html_response_has_csp(self):
         with tempfile.TemporaryDirectory() as tmp:

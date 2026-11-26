@@ -67,19 +67,16 @@ def ensure_config(config_dir: str | Path) -> Path:
 
 
 def _bootstrap_db(folder: Path) -> None:
-    """Create or migrate renamer.db. Failure must never block first run.
-
-    Any error (sqlite3.Error, locked file, permission) is downgraded to a
-    warning: loaders fall back to JSON/CSV when the db is missing or empty.
-    """
+    """Create or migrate renamer.db; never silently fall back to legacy JSON."""
     if os.environ.get("STEAM_CN_RENAMER_NO_DB"):
         return  # 测试用：保持纯 JSON 路径，避免在 fixtures 目录建库
     try:
         from db import ensure_db
+        from mapping import _validate_ledger
 
-        ensure_db(folder, DEFAULTS_DIR)
-    except Exception as exc:  # noqa: BLE001 - 存储降级必须兜底
-        print(f"[warn] SQLite 存储初始化失败，继续使用 JSON: {exc}", file=sys.stderr)
+        ensure_db(folder, DEFAULTS_DIR, ledger_validator=_validate_ledger)
+    except Exception as exc:  # noqa: BLE001 - 初始化失败只告警，不伪造数据源
+        print(f"[warn] SQLite 存储初始化失败，请检查配置目录：{exc}", file=sys.stderr)
 
 
 DEFAULT_CONFIG = default_config_dir()

@@ -31,7 +31,8 @@ Steam 官方只对部分游戏提供简体中文名，大量独立游戏、老�
 
 - 分片解析结果按 `(mtime, size)` 增量缓存，Steam 只改 1 个分片时重算约 20 ms
 - 词库（社区 / 商店 / 原名）走 SQLite 按需查询，耗时与词库规模无关
-- 台账保留 JSON（可读、可 diff、可手改），SQLite 同步作为灾备
+- 台账与词库统一存入 SQLite；旧 JSON 仅在首次迁移时读取并备份，之后不再作为运行数据源
+- 可随时用 `export-ledger` 导出可读 JSON 备份，便于查看、diff 和归档
 
 ## 快速开始
 
@@ -57,6 +58,7 @@ python src/cli.py scan              # 列出应用与当前名称
 python src/cli.py plan              # 预览改名计划
 python src/cli.py apply --execute   # 写入（会先备份）
 python src/cli.py sync --execute    # 补回被 Steam 覆盖的汉化
+python src/cli.py export-ledger -o names-export.json  # 从 SQLite 导出台账
 ```
 
 ## 使用流程

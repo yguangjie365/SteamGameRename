@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -54,31 +55,21 @@ def _read_community_csv(path: Path) -> dict[int, str]:
 
 
 def load_community_names(path: str | Path) -> dict[int, str]:
-    """Read the community AppID -> zh-CN dictionary (SteamGameName format).
-
-    A sibling CSV (community_names.csv) is merged on top, so users can drop
-    any table exported from SteamCN/3DM/its own list without converting JSON.
-    """
+    """Read the community dictionary from SQLite, then apply optional CSV overrides."""
     source = Path(path)
     result: dict[int, str] = {}
-
-    # SQLite 优先：社区词库是最可能膨胀的数据源（全量 Steam 可到 10 万条）。
-    # CSV 覆盖层仍然生效，用户丢一个 community_names.csv 进来就能局部覆盖。
-    db_file = dbmod.db_path(source.parent)
-    if db_file.exists():
+    if not os.environ.get("STEAM_CN_RENAMER_NO_DB"):
+        db_file = dbmod.db_path(source.parent)
         conn = dbmod.connect(db_file)
+        if not dbmod.community_ready(conn):
+            conn.close()
+            dbmod.ensure_db(source.parent)
+            conn = dbmod.connect(db_file)
         try:
-            stored = dbmod.read_community(conn)
+            result.update(dbmod.read_community(conn))
         finally:
             conn.close()
-        if stored:
-            result.update(stored)
-            csv_path = source.with_suffix(".csv")
-            if csv_path.exists():
-                result.update(_read_community_csv(csv_path))
-            return result
-
-    if source.exists():
+    elif source.exists():
         try:
             raw = json.loads(source.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -87,6 +78,7 @@ def load_community_names(path: str | Path) -> dict[int, str]:
         for key, value in games.items():
             if key.isdigit() and isinstance(value, str) and value.strip():
                 result[int(key)] = value.strip()
+
     csv_path = source.with_suffix(".csv")
     if csv_path.exists():
         result.update(_read_community_csv(csv_path))
@@ -121,27 +113,27 @@ def update_community_names(
     games = payload.get("games")
     if not isinstance(games, dict) or not games:
         raise ValueError("社区词库为空或结构错误")
-    atomic_write(
-        dest,
-        (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-    )
-    # 同步进 SQLite：load_community_names 优先读 db，只写文件会读到旧数据
-    db_file = dbmod.db_path(Path(dest).parent)
-    if db_file.exists():
-        fresh = {
-            int(key): value.strip()
-            for key, value in games.items()
-            if key.isdigit() and isinstance(value, str) and value.strip()
-        }
-        if fresh:
-            conn = dbmod.connect(db_file)
-            try:
-                dbmod.write_community(conn, fresh)
-            finally:
-                conn.close()
-    return sum(
-        1 for key, value in games.items()
+    fresh = {
+        int(key): value.strip()
+        for key, value in games.items()
         if key.isdigit() and isinstance(value, str) and value.strip()
-    )
+    }
+    if not fresh:
+        raise ValueError("社区词库没有可用的中文名")
+
+    target = Path(dest)
+    if os.environ.get("STEAM_CN_RENAMER_NO_DB"):
+        atomic_write(
+            target,
+            (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+        )
+    else:
+        dbmod.ensure_db(target.parent)
+        conn = dbmod.connect(dbmod.db_path(target.parent))
+        try:
+            dbmod.write_community(conn, fresh)
+        finally:
+            conn.close()
+    return len(fresh)
 
 

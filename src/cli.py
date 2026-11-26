@@ -25,8 +25,10 @@ from backup import (
 from game_names import check_originals, load_shared_names, write_shared_names_csv
 from mapping import (
     approved_changes,
+    export_names_json,
     fetch_store_names,
     learn_original_names,
+    load_names,
     pending_changes,
     plan_from_config,
     scan_shards,
@@ -394,6 +396,22 @@ def update_community(ctx: typer.Context) -> None:
     console.print(f"已更新社区词库，共 {count} 条")
 
 
+@app.command("export-ledger")
+def export_ledger(
+    ctx: typer.Context,
+    output: str = typer.Option("names-export.json", "--output", "-o", help="输出 JSON 路径"),
+) -> None:
+    """把 SQLite 台账导出为可读 JSON 备份。"""
+    _, config_dir, _ = _context(ctx)
+    data = load_names(config_dir / "names.json")
+    dest = Path(output)
+    if dest.exists():
+        raise typer.BadParameter(f"文件已存在，请指定其他路径：{dest}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    export_names_json(data, dest)
+    console.print(f"已导出 {len(data.get('entries') or {})} 条到 {dest}")
+
+
 @app.command("export-mappings")
 def export_mappings(
     ctx: typer.Context,
@@ -404,7 +422,7 @@ def export_mappings(
 ) -> None:
     """把台账里的中文名导出为共享词库 CSV（UTF-8 BOM，Excel 可直接编辑）。"""
     _, config_dir, _ = _context(ctx)
-    data = json.loads((config_dir / "names.json").read_text(encoding="utf-8"))
+    data = load_names(config_dir / "names.json")
     rows: list[tuple[int, str, str, str]] = []
     for key, item in data.get("entries", {}).items():
         if not key.isdigit() or (approved_only and not item.get("approved")):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 import time
 import webbrowser
@@ -50,7 +51,8 @@ def _source_signature(appinfo: Path, config_dir: Path) -> tuple:
         config_dir / name
         for name in ("names.json", "rules.json", "store_cache.json",
                      "community_names.json", "community_names.csv",
-                     "game_names.csv")
+                     "game_names.csv", "renamer.db", "renamer.db-wal",
+                     "renamer.db-shm")
     ]
     paths += [
         asset_dir("defaults") / "game_names.csv",
@@ -322,7 +324,13 @@ def make_handler(
                     data["entries"] = entries
                     summary = data.setdefault("summary", {})
                     summary["entries_in_file"] = len(entries)
-                    save_names(data, names_path)
+                    try:
+                        save_names(data, names_path)
+                    except (OSError, ValueError, sqlite3.Error) as exc:
+                        self._json(400, {"error": str(exc)})
+                        return
+                    with _plan_lock:
+                        _plan_cache.clear()
                 self._json(200, {"message": f"已保存 {len(entries)} 条"})
                 return
 
@@ -386,7 +394,7 @@ def make_handler(
                         data.setdefault("defaults", {}).update(defaults)
                         save_names(data, names_path)
                         _plan_cache.clear()
-                except (OSError, ValueError) as exc:
+                except (OSError, ValueError, sqlite3.Error) as exc:
                     self._json(400, {"error": str(exc)})
                     return
                 self._json(200, {
