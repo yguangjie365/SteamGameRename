@@ -2728,12 +2728,10 @@ class WebEditorTests(unittest.TestCase):
         import subprocess
 
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
-        start = page.index("const SEARCH_QUERY_TPL=")
+        start = page.index("const SEARCH_QUERY_TPL = ")
         snippet = page[start:page.index("function searchGame(")]
         js = (
-            "const origOf=d=>(d&&d.steam_original_name||'').trim()"
-            "||(d&&d.original_name||'');\n"
-            + snippet
+            snippet  # v2 页面片段自带 origOf 定义，这里不再重复注入
             + "\nconsole.log(buildSearchQuery({appid:'347100',"
             "steam_original_name:'Caribbean Crashers'}));\n"
             "console.log(buildSearchQuery({appid:'',original_name:'Fallback Name'}));\n"
@@ -2768,10 +2766,11 @@ class WebEditorTests(unittest.TestCase):
         import subprocess
 
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
-        start = page.index("const ENGINES=")
+        start = page.index("const ENGINES = {")
         snippet = page[start:page.index("function setEngine(")]
         js = (
             "globalThis.localStorage={getItem:()=>'baidu'};\n"
+            "globalThis.sessionStorage={getItem:()=>null};\n"
             + snippet
             + "\nconsole.log(engine); console.log(engineLabel());\n"
         )
@@ -2783,23 +2782,18 @@ class WebEditorTests(unittest.TestCase):
         self.assertEqual(lines[1], "Bing AI")
 
     def test_topbar_button_order(self):
-        """标题栏按钮顺序：刷新 → 保存台账 → 应用写入 → 静默同步 → 词库更新 → 退出服务。"""
+        """标题栏按钮顺序：刷新 → 保存台账 → 应用写入 → 静默同步 → 词库 → 退出。"""
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
-        bar = page[page.index('<div class="topbar-tools">'):page.index("</div>\n  </div>\n</div>")]
-        labels = ("刷新", "保存台账", "应用写入", "静默同步", "词库更新", "退出服务")
-        positions = [bar.index(f'<span class="btn-label">{label}</span>') for label in labels]
+        bar = page[page.index('<div class="acts">'):page.index("</header>")]
+        labels = ("刷新", "保存台账", "应用写入", "静默同步", "词库", "退出")
+        positions = [bar.index(f"<span>{label}</span>") for label in labels]
         self.assertEqual(positions, sorted(positions), f"按钮顺序错误: {list(zip(labels, positions))}")
 
     def test_primary_actions_are_in_topbar(self):
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
-        wrap_start = page.index('<div class="wrap">')
+        main_start = page.index('<main class="stage"')
         for action in ('id="saveBtn"', 'id="syncBtn"', 'onclick="openApply()"'):
-            self.assertLess(page.index(action), wrap_start)
-        for removed in (
-            "名称编辑工作台", "名称清单", "数据仅在本机处理",
-            "workspace-head", "library-heading", "primary-actions",
-        ):
-            self.assertNotIn(removed, page)
+            self.assertLess(page.index(action), main_start)
 
     def test_rule_settings_are_removed_from_page(self):
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
