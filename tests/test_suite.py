@@ -383,6 +383,14 @@ class ConfigTests(unittest.TestCase):
                 if "pip install" in line:
                     self.assertIn("<", line, f"{bat} 的 pip install 没有版本上限")
 
+    def test_launcher_settings_file_at_project_root(self):
+        """launcher.json 属于项目根，不能因模块移入 src/ 而跑偏。"""
+        import steam_locator
+
+        self.assertEqual(
+            steam_locator.SETTINGS_FILE.resolve(), (ROOT / "launcher.json").resolve()
+        )
+
     def test_browser_mode_entrypoint(self):
         """v0.8.0 起：浏览器模式，run.py 为唯一入口，无桌面壳依赖。"""
         self.assertTrue((ROOT / "run.py").is_file())

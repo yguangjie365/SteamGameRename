@@ -13,7 +13,9 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SETTINGS_FILE = ROOT / "launcher.json"
+# 本模块位于 src/，但 launcher.json 属于项目根（与 run.py 同层）
+PROJECT_ROOT = ROOT.parent
+SETTINGS_FILE = PROJECT_ROOT / "launcher.json"
 
 COMMON_STEAM_PATHS = (
     r"C:\Program Files (x86)\Steam",
