@@ -409,7 +409,7 @@ def fetch(
 @app.command("update-community")
 def update_community(ctx: typer.Context) -> None:
     """联网更新社区中文名词库（GitHub / SteamGameName）。"""
-    _, config_dir, _ = _context(ctx)
+    config_dir = Path(ctx.obj["config_dir"])  # 纯联网命令，不依赖 Steam 目录
     count = update_community_names(config_dir / "community_names.json")
     console.print(f"已更新社区词库，共 {count} 条")
 
@@ -420,7 +420,7 @@ def export_ledger(
     output: str = typer.Option("names-export.json", "--output", "-o", help="输出 JSON 路径"),
 ) -> None:
     """把 SQLite 台账导出为可读 JSON 备份。"""
-    _, config_dir, _ = _context(ctx)
+    config_dir = Path(ctx.obj["config_dir"])  # 纯台账命令，不依赖 Steam 目录
     data = load_names(config_dir / "names.json")
     dest = Path(output)
     if dest.exists():
@@ -439,7 +439,7 @@ def export_mappings(
     ),
 ) -> None:
     """把台账里的中文名导出为共享词库 CSV（UTF-8 BOM，Excel 可直接编辑）。"""
-    _, config_dir, _ = _context(ctx)
+    config_dir = Path(ctx.obj["config_dir"])  # 纯台账命令，不依赖 Steam 目录
     data = load_names(config_dir / "names.json")
     rows: list[tuple[int, str, str, str]] = []
     for key, item in data.get("entries", {}).items():
