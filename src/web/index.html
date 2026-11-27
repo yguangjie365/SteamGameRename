@@ -504,9 +504,21 @@ function setEngine(v){
   render();
   toast('🔍 搜索已切换为 '+ENGINES[v].label);
 }
+// AI 搜索查询模板：裸英文名常被当成普通关键词，返回同名电影/书籍/其他游戏。
+// 用「Steam 游戏 + 书名号包裹原名 + AppID 唯一标识 + 明确提问中文名」提高命中率。
+// {name}=原名（纯英文），{appid}=AppID 括号片段（可为空）。
+const SEARCH_QUERY_TPL='Steam 游戏《{name}》{appid} 的中文名称是什么？请优先给出 Steam 商店的官方中文名。';
+function buildSearchQuery(d){
+  const name=(origOf(d)||d.desired_name||'').trim();
+  if(!name)return '';
+  const appid=String(d.appid||'').trim();
+  return SEARCH_QUERY_TPL
+    .replace('{name}',name)
+    .replace('{appid}',appid ? `（AppID ${appid}）` : '');
+}
 function searchGame(id){
   const d=find(id);if(!d)return;
-  const q=(origOf(d)||d.desired_name||String(d.appid)).trim();
+  const q=buildSearchQuery(d);
   if(!q)return;
   markSearched(id);
   window.open((ENGINES[engine]||ENGINES.baidu).url(q),'_blank','noopener,noreferrer');

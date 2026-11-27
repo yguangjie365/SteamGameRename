@@ -2630,6 +2630,32 @@ class ShutdownEndpointTests(unittest.TestCase):
 
 
 class WebEditorTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("node"), "需要 Node 执行前端 JS")
+    def test_search_query_is_ai_prompt(self):
+        """AI 搜索查询要带 Steam 场景、书名号包裹原名、AppID 与明确提问。"""
+        import subprocess
+
+        page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
+        start = page.index("const SEARCH_QUERY_TPL=")
+        snippet = page[start:page.index("function searchGame(")]
+        js = (
+            "const origOf=d=>(d&&d.steam_original_name||'').trim()"
+            "||(d&&d.original_name||'');\n"
+            + snippet
+            + "\nconsole.log(buildSearchQuery({appid:'347100',"
+            "steam_original_name:'Caribbean Crashers'}));\n"
+            "console.log(buildSearchQuery({appid:'',original_name:'Fallback Name'}));\n"
+        )
+        proc = subprocess.run(["node", "-e", js], capture_output=True,
+                              text=True, encoding="utf-8", timeout=20)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        with_appid, without = proc.stdout.strip().splitlines()
+        self.assertIn("Steam 游戏《Caribbean Crashers》", with_appid)
+        self.assertIn("（AppID 347100）", with_appid)
+        self.assertIn("中文名称是什么", with_appid)
+        self.assertNotIn("AppID", without)
+        self.assertIn("Fallback Name", without)
+
     def test_search_uses_ai_modes(self):
         """行内 🔍 必须打开各引擎的 AI 搜索，而不是普通结果页。"""
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
