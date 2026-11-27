@@ -64,8 +64,9 @@ class SearchWindowApi:
         )
         if not isinstance(url, str) or not any(url.startswith(p) for p in allowed):
             return False
+        # 辅助窗约为主窗口的 6 成：够读 AI 回答，又不喧宾夺主
         webview.create_window(
-            "名称搜索", url, width=1100, height=820, min_size=(800, 500),
+            "名称搜索", url, width=720, height=560, min_size=(560, 420),
         )
         return True
 

@@ -2323,6 +2323,11 @@ class SearchWindowTests(unittest.TestCase):
             self.assertTrue(api.open_search(
                 "https://www.bing.com/copilotsearch?q=test"))
             self.assertTrue(cw.called)
+            # 辅助窗应保持小巧（约主窗口 6 成），不喧宾夺主
+            _, kwargs = cw.call_args
+            self.assertLessEqual(kwargs["width"], 800)
+            self.assertLessEqual(kwargs["height"], 640)
+            self.assertLessEqual(kwargs["min_size"][0], 600)
             cw.reset_mock()
             for bad in ("https://evil.com/?q=x", "file:///C:/x", None, 123):
                 self.assertFalse(api.open_search(bad))
