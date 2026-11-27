@@ -11,6 +11,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from steam_locator import detect_steam_dir, load_settings
+
 from backup import (
     CREATABLE_TARGETS,
     BackupError,
@@ -98,12 +100,26 @@ app = typer.Typer(no_args_is_help=True, help="将 Steam 库游戏名称改为中
 @app.callback()
 def global_options(
     ctx: typer.Context,
-    steam_dir: str = typer.Option(r"D:\Steam", help="Steam 安装目录"),
+    steam_dir: str | None = typer.Option(
+        None, help="Steam 安装目录；留空则与桌面版一样自动探测"
+    ),
     config_dir: str = typer.Option(str(DEFAULT_CONFIG), help="配置目录"),
     backup_root: str = typer.Option(str(DEFAULT_BACKUPS), help="备份根目录"),
 ) -> None:
+    # 显式 --steam-dir 直接采信（调用方自行保证路径正确，测试也常用临时目录）；
+    # 未指定时才走桌面版同一条探测链，避免非 D 盘用户每次手填。
+    if steam_dir:
+        found, source = Path(steam_dir), "命令行参数"
+    else:
+        found, source = detect_steam_dir(None, load_settings())
+    if found is None:
+        raise typer.BadParameter(
+            "未能定位 Steam 安装目录；请用 --steam-dir 指定，"
+            "或设置环境变量 STEAM_DIR"
+        )
     ctx.obj = {
-        "steam_dir": steam_dir,
+        "steam_dir": str(found),
+        "steam_dir_source": source,
         "config_dir": ensure_config(config_dir),
         "backup_root": backup_root,
     }

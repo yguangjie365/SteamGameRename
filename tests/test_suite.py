@@ -365,6 +365,29 @@ class ConfigTests(unittest.TestCase):
         actual = {p.stem for p in (ROOT / "src").glob("*.py")}
         self.assertEqual(actual - listed, set(), "src 下有模块未列入 py-modules")
 
+    def test_dependency_bounds_are_pinned(self):
+        """依赖需有上限，避免首次启动时装入未验证的主版本。"""
+        import tomllib
+
+        data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        all_deps = list(data["project"]["dependencies"]) + list(
+            data["project"]["optional-dependencies"]["desktop"]
+        )
+        for dep in all_deps:
+            self.assertIn("<", dep, f"依赖没有上限: {dep}")
+        # bat 里的安装命令也要带上限，不能是裸包名
+        for bat in ("SteamGameRename.bat", "安装依赖.bat"):
+            text = (ROOT / bat).read_text(encoding="utf-8")
+            for line in text.splitlines():
+                if "pip install" in line:
+                    self.assertIn("<", line, f"{bat} 的 pip install 没有版本上限")
+
+    def test_cli_uses_steam_locator(self):
+        """CLI 默认走探测链，不再硬编码 D:\\Steam。"""
+        cli = (ROOT / "src" / "cli.py").read_text(encoding="utf-8")
+        self.assertIn("from steam_locator import detect_steam_dir", cli)
+        self.assertNotIn(r"D:\Steam", cli)
+
     def test_source_distribution_excludes_runtime_data(self):
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
         for line in manifest.splitlines():

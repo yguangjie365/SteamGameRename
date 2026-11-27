@@ -16,8 +16,8 @@ if not defined PYCMD (
   exit /b 1
 )
 
-echo Installing dependencies: typer rich httpx pydantic
-%PYCMD% -m pip install --upgrade --index-url https://pypi.org/simple typer rich httpx pydantic
+echo Installing dependencies: typer rich httpx pydantic (pinned to tested major versions)
+%PYCMD% -m pip install --upgrade --index-url https://pypi.org/simple "typer>=0.12,<1" "rich>=13,<15" "httpx>=0.27,<1" "pydantic>=2,<3"
 if errorlevel 1 (
   echo.
   echo [!] Installation failed. Check your network / proxy and try again.

@@ -19,11 +19,11 @@ if not defined PYCMD (
 %PYCMD% -X utf8 -c "import webview, pystray, PIL" >nul 2>&1
 if errorlevel 1 (
   echo [i] Desktop dependencies are missing. Installing...
-  %PYCMD% -m pip install pywebview pystray Pillow
+  %PYCMD% -m pip install "pywebview>=5,<6" "pystray>=0.19,<1" "Pillow>=10,<13"
   if errorlevel 1 (
     echo.
     echo [!] Automatic install failed. Please run this manually, then retry:
-    echo     %PYCMD% -m pip install pywebview pystray Pillow
+    echo     %PYCMD% -m pip install "pywebview>=5,<6" "pystray>=0.19,<1" "Pillow>=10,<13"
     echo.
     pause
     exit /b 1
