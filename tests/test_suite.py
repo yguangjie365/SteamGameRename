@@ -1442,17 +1442,36 @@ class SteamOriginalNameTests(unittest.TestCase):
             self.assertEqual(row.steam_original_name, "")
 
     def test_bundled_csv_is_loaded_and_wins_over_ledger(self):
+        """随包对照表的英文名优先于台账记录（台账 original_name 被改写成中文也不影响展示）。"""
         import game_names
         import mapping
 
-        table = game_names.load_original_names(
-            mapping.asset_dir("defaults") / "original_names.csv"
-        )
-        self.assertGreater(len(table), 500)
-        self.assertEqual(table.get(588650), "Dead Cells")
-        self.assertEqual(table.get(990080), "Hogwarts Legacy")
-        # 即使台账的 original_name 已被改写成中文，展示字段仍取 CSV 里的英文名
-        self.assertEqual(table.get(651430), self.EN_NAME)
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = Path(tmp) / "original_names.csv"
+            csv_path.write_text(
+                "GameID,OriginalName,ModifiedName\n"
+                f"{self.APPID},{self.EN_NAME},\n"
+                "588650,Dead Cells,\n",
+                encoding="utf-8",
+            )
+            table = game_names.load_original_names(csv_path)
+            self.assertEqual(len(table), 2)
+            self.assertEqual(table.get(588650), "Dead Cells")
+            self.assertEqual(table.get(651430), self.EN_NAME)
+
+            # 台账的 original_name 已被改写成中文时，展示字段仍取 CSV 里的英文名
+            names = self._names_fixture()
+            names["entries"]["651430"]["original_name"] = self.ZH_NAME
+            names["defaults"]["mapping_priority"] = ["community"]
+            plan = mapping.build_plan(
+                FIXTURES, names,
+                original_names=table,
+            )
+            row = next(x for x in plan if x.appid == self.APPID)
+            self.assertEqual(row.original_name, self.EN_NAME)  # 分片原文
+            # 台账 original_name 已是中文（ZH_NAME），但展示字段仍取 CSV 英文名
+            self.assertEqual(row.steam_original_name, self.EN_NAME)
+            self.assertNotEqual(row.steam_original_name, self.ZH_NAME)
 
 
 class LauncherTests(unittest.TestCase):
