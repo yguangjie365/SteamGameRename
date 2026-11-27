@@ -418,16 +418,20 @@ def _plan_entry(
             note=note or "该条目在 Steam 数据中没有名称字段，暂不支持改名",
         )
 
-    base = "" if record.get("manual_override") else (record.get("base_name") or "")
-    source = "" if record.get("manual_override") else record.get("source", "")
-    if base and not CJK.search(base):
-        base, source = "", ""
+    # 建议名始终实时按 mapping_priority 从词库/本地化合成（community_names、
+    # store_cache、shared_names 更新后立即反映到计划），台账里缓存的 base_name
+    # 只在词库全部落空时兜底（如 NO_DB 模式），不再优先于词库。
+    base, source = resolve_base(
+        original, localized, priority,
+        community_names=community_names, store_cache=store_cache,
+        appid=entry.appid, shared_names=shared_names,
+    )
     if not base:
-        base, source = resolve_base(
-            original, localized, priority,
-            community_names=community_names, store_cache=store_cache,
-            appid=entry.appid, shared_names=shared_names,
-        )
+        base = record.get("base_name") or ""
+        source = record.get("source", "")
+    if base and not CJK.search(base):
+        # Steam 本地化或兜底缓存可能是英文原文（schinese 未翻译时 Valve 回英文）
+        base, source = "", ""
     if not base or not CJK.search(base):
         base = ""
 

@@ -93,6 +93,43 @@ class HardeningTests(unittest.TestCase):
         with self.assertRaises(ShardError):
             build_bytes(shard, {443510: {"common.not_a_field": "x"}})
 
+    def test_community_names_priority_over_stale_chinese_base(self):
+        """词库更新后，台账缓存的中文建议名也要被词库新值覆盖。"""
+        names = {
+            "schema_version": 1,
+            "defaults": {"mapping_priority": ["local_schinese", "community"]},
+            "entries": {
+                # 台账缓存了一个旧中文建议名；词库已更新为「新版译名」
+                "443510": {"base_name": "旧版译名", "source": "community"},
+            },
+        }
+        community = {443510: "新版译名"}
+        plan = build_plan(
+            FIXTURES, names,
+            include_no_zh=False, community_names=community,
+        )
+        item = next(p for p in plan if p.appid == 443510)
+        self.assertEqual(item.base_name, "新版译名")
+        self.assertEqual(item.source, "community")
+        self.assertEqual(item.desired_name, "新版译名")
+        self.assertEqual(item.status, "suggested")
+
+    def test_ledger_base_name_falls_back_when_library_missing(self):
+        """词库全部落空（如 NO_DB 模式）时，台账缓存仍是兜底来源。"""
+        names = {
+            "schema_version": 1,
+            "defaults": {"mapping_priority": ["community"]},
+            "entries": {
+                "443510": {"base_name": "缓存兜底名", "source": "community"},
+            },
+        }
+        plan = build_plan(
+            FIXTURES, names, include_no_zh=False, community_names={},
+        )
+        item = next(p for p in plan if p.appid == 443510)
+        self.assertEqual(item.base_name, "缓存兜底名")
+        self.assertEqual(item.desired_name, "缓存兜底名")
+
     def test_community_names_priority_over_stale_english_base(self):
         from mapping import load_community_names
 
