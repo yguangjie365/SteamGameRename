@@ -2306,6 +2306,59 @@ class WriteGuardTests(unittest.TestCase):
             self.assertEqual((appinfo / "appinfo_00.vdf").read_bytes(), original)
 
 
+class SearchWindowTests(unittest.TestCase):
+    """桌面版在程序内新窗口打开搜索；前端在无 pywebview 时回退新标签。"""
+
+    def test_open_search_only_allows_ai_engine_urls(self):
+        import types
+
+        import run_desktop
+
+        api = run_desktop.SearchWindowApi()
+        # CI / 无桌面依赖环境也要能测：注入一个假的 webview 模块
+        fake = types.ModuleType("webview")
+        fake.create_window = mock.Mock()
+        with mock.patch.dict(sys.modules, {"webview": fake}), \
+                mock.patch.object(fake, "create_window") as cw:
+            self.assertTrue(api.open_search(
+                "https://www.bing.com/copilotsearch?q=test"))
+            self.assertTrue(cw.called)
+            cw.reset_mock()
+            for bad in ("https://evil.com/?q=x", "file:///C:/x", None, 123):
+                self.assertFalse(api.open_search(bad))
+            self.assertFalse(cw.called)
+
+    @unittest.skipUnless(shutil.which("node"), "需要 Node 执行前端 JS")
+    def test_search_game_uses_pywebview_when_available(self):
+        import subprocess
+
+        page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
+        start = page.index("async function searchGame(")
+        snippet = page[start:page.index("function markSearched(")]
+        # 桩：find/ origOf/ buildSearchQuery/ ENGINES/ markSearched
+        stub = (
+            "const find=()=>({appid:'1',steam_original_name:'X'});\n"
+            "const origOf=d=>d.steam_original_name;\n"
+            "const buildSearchQuery=()=>'query';\n"
+            "const ENGINES={bing:{url:q=>'https://www.bing.com/copilotsearch?q='+q}};\n"
+            "const DEFAULT_ENGINE='bing'; let engine='bing';\n"
+            "const markSearched=()=>{};\n"
+        )
+        # 场景1：有 API 且返回 true → 不调用 window.open
+        js1 = stub + "let opened=false; globalThis.window={pywebview:{api:{open_search:async()=>true}},open:()=>{opened=true}};\n" + snippet + "\nsearchGame('1').then(()=>console.log('opened='+opened));\n"
+        r1 = subprocess.run(["node", "-e", js1], capture_output=True, text=True,
+                            encoding="utf-8", timeout=20)
+        self.assertEqual(r1.returncode, 0, r1.stderr)
+        self.assertIn("opened=false", r1.stdout)
+
+        # 场景2：无 API → 回退 window.open
+        js2 = stub + "let opened=false; globalThis.window={open:()=>{opened=true}};\n" + snippet + "\nsearchGame('1').then(()=>console.log('opened='+opened));\n"
+        r2 = subprocess.run(["node", "-e", js2], capture_output=True, text=True,
+                            encoding="utf-8", timeout=20)
+        self.assertEqual(r2.returncode, 0, r2.stderr)
+        self.assertIn("opened=true", r2.stdout)
+
+
 class FailClosedTests(unittest.TestCase):
     """第五轮审查的三处 fail-closed / 清单校验修复。"""
 
@@ -2659,7 +2712,7 @@ class WebEditorTests(unittest.TestCase):
 
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
         start = page.index("const SEARCH_QUERY_TPL=")
-        snippet = page[start:page.index("function searchGame(")]
+        snippet = page[start:page.index("async function searchGame(")]
         js = (
             "const origOf=d=>(d&&d.steam_original_name||'').trim()"
             "||(d&&d.original_name||'');\n"

@@ -51,6 +51,25 @@ def acquire_instance_lock() -> "object | None":
     return sock
 
 
+class SearchWindowApi:
+    """暴露给前端：在程序内新窗口打开搜索结果，避免在浏览器标签间来回切。"""
+
+    def open_search(self, url: str) -> bool:
+        import webview
+
+        # 只接受本程序生成的搜索引擎 URL，防止前端被注入后任意开窗
+        allowed = (
+            "https://www.bing.com/copilotsearch?q=",
+            "https://www.google.com/search?udm=50&q=",
+        )
+        if not isinstance(url, str) or not any(url.startswith(p) for p in allowed):
+            return False
+        webview.create_window(
+            "名称搜索", url, width=1100, height=820, min_size=(800, 500),
+        )
+        return True
+
+
 def missing_desktop_deps() -> str | None:
     try:
         import webview  # noqa: F401
@@ -293,6 +312,7 @@ def main(argv: list[str] | None = None) -> int:
     window = webview.create_window(
         "SteamGameRename", url,
         width=1200, height=840, min_size=(900, 600),
+        js_api=SearchWindowApi(),
     )
 
     icon = None
