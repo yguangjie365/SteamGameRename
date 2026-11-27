@@ -215,19 +215,6 @@ button,a,input,select{touch-action:manipulation}
 /* ---------------------------------------------------------------- stage */
 .stage{position:relative;z-index:1;max-width:var(--stage);margin:0 auto;
   padding:clamp(30px,4vw,46px) clamp(16px,3vw,36px) 40px}
-.masthead{display:flex;align-items:flex-end;justify-content:space-between;gap:36px;
-  margin-bottom:30px}
-.eyebrow{display:flex;align-items:center;gap:10px;margin:0 0 15px;
-  font:600 9.5px/1 var(--mono);letter-spacing:.24em;text-transform:uppercase;color:var(--faint)}
-.eyebrow::before{content:"";width:26px;height:1px;background:var(--line-2)}
-h1{margin:0;font-size:clamp(30px,3.4vw,43px);line-height:1.04;letter-spacing:-.035em;font-weight:600}
-.lede{margin:13px 0 0;max-width:640px;color:var(--muted);font-size:12.5px}
-.masthead-meta{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 18px;
-  align-items:baseline;font-size:11px;min-width:250px;max-width:380px}
-.masthead-meta dt{font:500 9.5px/1.5 var(--mono);letter-spacing:.14em;color:var(--faint);text-transform:uppercase}
-.masthead-meta dd{margin:0;color:var(--text-2);text-align:right;font-family:var(--mono);font-size:11px;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.masthead-meta dd.ok{color:var(--accent-2)}
 
 /* ---------------------------------------------------------------- metrics */
 .metrics{position:relative;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));
@@ -504,7 +491,6 @@ h1,h2{text-wrap:balance}
 
 /* ---------------------------------------------------------------- responsive */
 @media (max-width:1120px){
-  .masthead-meta{display:none}
   .metric{padding-left:12px;padding-right:12px}
 }
 @media (max-width:960px){
@@ -530,8 +516,6 @@ h1,h2{text-wrap:balance}
   .stage{padding-top:26px}
   .live .live-word{display:none}
   .live{padding:5px 8px}
-  .masthead{margin-bottom:24px}
-  .lede{max-width:none}
   .metric{flex-basis:132px;padding:14px 13px 12px}
   .bulk{gap:10px}
   .bulk-actions{gap:14px;width:100%}
@@ -611,19 +595,6 @@ h1,h2{text-wrap:balance}
 </header>
 
 <main class="stage" id="main" tabindex="-1">
-  <section class="masthead">
-    <div>
-      <p class="eyebrow">Steam Library / Appinfo Cache</p>
-      <h1>游戏库台账</h1>
-      <p class="lede">审阅建议译名，保存台账后再写入 Steam 本地缓存。所有改动先落本地，写入前自动备份。</p>
-    </div>
-    <dl class="masthead-meta">
-      <dt>Steam 目录</dt><dd id="steamPath">—</dd>
-      <dt>缓存分片</dt><dd id="metaLine">—</dd>
-      <dt>载入时间</dt><dd id="loadedAt">—</dd>
-    </dl>
-  </section>
-
   <section class="metrics" id="metrics" aria-label="条目统计">
     <span class="metric-ink" id="metricInk" aria-hidden="true"></span>
     <button class="metric" type="button" data-status="" aria-pressed="false">
@@ -1272,9 +1243,6 @@ async function load(silent){
   page = 0;
   render();
   clearDirty();
-  const shards = new Set(rows.map(d => d.shard).filter(Boolean)).size;
-  $('metaLine').textContent = shards + ' 个分片 / ' + rows.length + ' 条';
-  $('loadedAt').textContent = new Date().toLocaleTimeString('zh-CN', {hour12:false});
   if (!silent) toast('已载入 ' + rows.length + ' 条记录');
 }
 async function save(){
@@ -1480,11 +1448,6 @@ async function loadStatus(){
   if (j.version) {
     $('appVer').textContent = 'v' + j.version;
     $('appVer').title = '程序版本 ' + j.version;
-  }
-  if (j.steam_dir) {
-    $('steamPath').textContent = j.steam_dir;
-    $('steamPath').title = j.steam_dir;
-    $('steamPath').classList.add('ok');
   }
 }
 async function quitServer(){
