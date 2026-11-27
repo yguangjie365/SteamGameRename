@@ -1,3 +1,1 @@
-"""Version of the Steam Chinese-name editor (flat src layout)."""
-
-__version__ = "0.9.0"
+__version__ = "1.0.0"
