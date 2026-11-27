@@ -516,21 +516,12 @@ function buildSearchQuery(d){
     .replace('{name}',name)
     .replace('{appid}',appid ? `（AppID ${appid}）` : '');
 }
-async function searchGame(id){
+function searchGame(id){
   const d=find(id);if(!d)return;
   const q=buildSearchQuery(d);
   if(!q)return;
   markSearched(id);
   const url=(ENGINES[engine]||ENGINES[DEFAULT_ENGINE]).url(q);
-  // 桌面版：在程序内新窗口打开搜索结果，不用在浏览器标签间来回切。
-  // 浏览器打开页面时没有 pywebview API，回退到新标签页。
-  try{
-    const api=window.pywebview && window.pywebview.api;
-    if(api && typeof api.open_search==='function'){
-      const ok=await api.open_search(url);
-      if(ok)return;
-    }
-  }catch(e){/* 桥接不可用时走浏览器回退 */}
   window.open(url,'_blank','noopener,noreferrer');
 }
 function markSearched(id){

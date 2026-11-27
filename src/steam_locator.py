@@ -1,8 +1,8 @@
 """Locate the Steam client install and remember the last choice.
 
-Extracted from the old browser launcher. The product now ships a desktop shell
-only (`run_desktop.py`), so the port probing / browser opening code that used to
-live here is gone; what remains is the discovery chain the desktop shell needs:
+Steam install discovery shared by the browser launcher (run.py) and the CLI.
+Port probing and browser opening live in run.py; this module owns only the
+discovery chain:
 
     命令行参数 → 环境变量 STEAM_DIR → launcher.json → 注册表 → 常见路径 → 全盘扫描
 """

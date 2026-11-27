@@ -26,7 +26,7 @@ Steam 官方只对部分游戏提供简体中文名，大量独立游戏、老�
 - 原名对照表：始终显示 Steam 最初的英文原名，悬停可看当前名
 - 可选同步简繁中文、写入拼音首字母（让 Steam 库按拼音 A–Z 排序）
 - 静默同步：Steam 更新覆盖汉化后，一键补回已批准项
-- 桌面版：原生窗口 + 系统托盘，Steam 退出后自动补写
+- 浏览器界面：系统默认浏览器打开，Steam 退出后自动补写
 
 **工程细节**
 
@@ -48,9 +48,9 @@ cd SteamGameRename
 
 **启动**
 
-双击 **`SteamGameRename.bat`**。首次运行会自动安装 `pywebview / pystray / Pillow`，装不上会提示手动安装命令。
+双击 **`SteamGameRename.bat`**。程序会启动本地服务并用系统默认浏览器打开界面，无需安装桌面依赖。
 
-界面是独立窗口，关闭只是收进托盘；Steam 退出后会自动补写被覆盖的汉化。
+关闭浏览器标签页不影响后台服务；点页面右上角「退出服务」即可停止。Steam 退出后会自动补写被覆盖的汉化。
 
 **命令行**
 
@@ -78,7 +78,7 @@ python src/cli.py export-ledger -o names-export.json  # 从 SQLite 导出台账
 ## 项目结构
 
 ```
-run_desktop.py      程序入口：pywebview 窗口 + 托盘 + Steam 退出后自动补写
+run.py             程序入口：本地服务 + 浏览器 + Steam 退出后自动补写
 steam_locator.py    Steam 安装目录探测（参数/环境变量/注册表/常见路径/全盘扫描）
 src/
   vdf.py            二进制 VDF 编解码

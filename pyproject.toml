@@ -1,6 +1,6 @@
 [project]
 name = "steam-cn-renamer"
-version = "0.7.0"
+version = "0.8.0"
 description = "将 Steam 库游戏名称改为中文的本地工具（appinfo v42）"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -13,13 +13,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-# 桌面壳（run_desktop.py）：原生窗口 + 托盘；缺依赖时直接报错退出，无浏览器回退。
-# 上限按主版本号收紧：避免上游 breaking release 在用户首次启动时被无声装入。
-desktop = ["pywebview>=5,<6", "pystray>=0.19,<1", "Pillow>=10,<13"]
 
 [project.scripts]
 steam-cn-renamer = "cli:main"
-steam-cn-renamer-editor = "gui:main"
+steam-cn-renamer-editor = "run:main"
 
 [build-system]
 requires = ["setuptools>=68"]

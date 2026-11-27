@@ -2,7 +2,7 @@ include pyproject.toml
 include README.md
 include LICENSE
 include 使用说明.md
-include run_desktop.py
+include run.py
 include "SteamGameRename.bat"
 include "创建桌面快捷方式.bat"
 include "安装依赖.bat"

@@ -20,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(ROOT))  # run.py / run_desktop.py 位于项目根
+sys.path.insert(0, str(ROOT))  # run.py 位于项目根
 
 # 测试保持纯 JSON/CSV 路径：否则 ensure_config 会在 fixtures 目录建 renamer.db，
 # 污染只读样例并让后续用例走另一条分支。SQLite 由 DbStorageTests 显式覆盖。
@@ -370,9 +370,10 @@ class ConfigTests(unittest.TestCase):
         import tomllib
 
         data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        all_deps = list(data["project"]["dependencies"]) + list(
-            data["project"]["optional-dependencies"]["desktop"]
-        )
+        all_deps = list(data["project"]["dependencies"])
+        for name, group in data["project"].get("optional-dependencies", {}).items():
+            if name != "dev":  # 测试依赖只影响开发者，不需要锁版本
+                all_deps.extend(group)
         for dep in all_deps:
             self.assertIn("<", dep, f"依赖没有上限: {dep}")
         # bat 里的安装命令也要带上限，不能是裸包名
@@ -381,6 +382,17 @@ class ConfigTests(unittest.TestCase):
             for line in text.splitlines():
                 if "pip install" in line:
                     self.assertIn("<", line, f"{bat} 的 pip install 没有版本上限")
+
+    def test_browser_mode_entrypoint(self):
+        """v0.8.0 起：浏览器模式，run.py 为唯一入口，无桌面壳依赖。"""
+        self.assertTrue((ROOT / "run.py").is_file())
+        self.assertFalse((ROOT / "run_desktop.py").exists())
+        pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertNotIn("pywebview", pyproject)
+        self.assertNotIn("pystray", pyproject)
+        bat = (ROOT / "SteamGameRename.bat").read_text(encoding="utf-8")
+        self.assertIn("run.py", bat)
+        self.assertNotIn("pywebview", bat)
 
     def test_cli_uses_steam_locator(self):
         """CLI 默认走探测链，不再硬编码 D:\\Steam。"""
@@ -2157,11 +2169,11 @@ class SqliteStorageTests(unittest.TestCase):
             self.assertEqual(got[8], "OnlyLearned")
 
 
-class DesktopShellTests(unittest.TestCase):
-    """桌面壳的纯逻辑部分；GUI 窗口本身需要人工实测。"""
+class LauncherTests(unittest.TestCase):
+    """浏览器启动器的纯逻辑部分；GUI 窗口本身需要人工实测。"""
 
     def test_guard_only_syncs_on_exit_edge(self):
-        import run_desktop as rd
+        import run as rd
 
         self.assertFalse(rd.SteamGuard.should_sync(None, False), "初始未知不得写入")
         self.assertFalse(rd.SteamGuard.should_sync(None, True))
@@ -2172,7 +2184,7 @@ class DesktopShellTests(unittest.TestCase):
     def test_guard_interval_has_floor(self):
         import threading
 
-        import run_desktop as rd
+        import run as rd
 
         guard = rd.SteamGuard(".", ".", ".", threading.Lock(), interval=0.01)
         self.assertGreaterEqual(guard._interval, 5.0, "防止把轮询设得过密")
@@ -2183,35 +2195,12 @@ class DesktopShellTests(unittest.TestCase):
         from unittest import mock
 
         import backup
-        import run_desktop as rd
+        import run as rd
 
         guard = rd.SteamGuard(".", ".", ".", threading.Lock())
         with mock.patch.object(backup, "steam_running", return_value=True):
             self.assertEqual(guard.sync_once(), 0)
         self.assertIn("运行中", guard.last_result)
-
-    def test_tray_image_is_valid_png(self):
-        try:
-            import PIL  # noqa: F401
-        except ImportError:
-            self.skipTest("Pillow 未安装")
-        import io
-
-        import run_desktop as rd
-
-        image = rd.tray_image()
-        self.assertEqual(image.size, (64, 64))
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG")
-        self.assertEqual(buffer.getvalue()[:8], b"\x89PNG\r\n\x1a\n")
-
-    def test_missing_deps_reports_reason(self):
-        import run_desktop as rd
-
-        # 当前环境未装 desktop 依赖时必须给出可读原因，而不是抛异常
-        missing = rd.missing_desktop_deps()
-        self.assertTrue(missing is None or isinstance(missing, str))
-
 
 class WriteGuardTests(unittest.TestCase):
     """写入链路的四道新守卫：平台、原始完整性、陈旧解析树、中断回滚。"""
@@ -2304,64 +2293,6 @@ class WriteGuardTests(unittest.TestCase):
                     apply_changes(appinfo, changes, Path(tmp) / "backups",
                                   require_steam_closed=False)
             self.assertEqual((appinfo / "appinfo_00.vdf").read_bytes(), original)
-
-
-class SearchWindowTests(unittest.TestCase):
-    """桌面版在程序内新窗口打开搜索；前端在无 pywebview 时回退新标签。"""
-
-    def test_open_search_only_allows_ai_engine_urls(self):
-        import types
-
-        import run_desktop
-
-        api = run_desktop.SearchWindowApi()
-        # CI / 无桌面依赖环境也要能测：注入一个假的 webview 模块
-        fake = types.ModuleType("webview")
-        fake.create_window = mock.Mock()
-        with mock.patch.dict(sys.modules, {"webview": fake}), \
-                mock.patch.object(fake, "create_window") as cw:
-            self.assertTrue(api.open_search(
-                "https://www.bing.com/copilotsearch?q=test"))
-            self.assertTrue(cw.called)
-            # 辅助窗应保持小巧（约主窗口 6 成），不喧宾夺主
-            _, kwargs = cw.call_args
-            self.assertLessEqual(kwargs["width"], 800)
-            self.assertLessEqual(kwargs["height"], 640)
-            self.assertLessEqual(kwargs["min_size"][0], 600)
-            cw.reset_mock()
-            for bad in ("https://evil.com/?q=x", "file:///C:/x", None, 123):
-                self.assertFalse(api.open_search(bad))
-            self.assertFalse(cw.called)
-
-    @unittest.skipUnless(shutil.which("node"), "需要 Node 执行前端 JS")
-    def test_search_game_uses_pywebview_when_available(self):
-        import subprocess
-
-        page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
-        start = page.index("async function searchGame(")
-        snippet = page[start:page.index("function markSearched(")]
-        # 桩：find/ origOf/ buildSearchQuery/ ENGINES/ markSearched
-        stub = (
-            "const find=()=>({appid:'1',steam_original_name:'X'});\n"
-            "const origOf=d=>d.steam_original_name;\n"
-            "const buildSearchQuery=()=>'query';\n"
-            "const ENGINES={bing:{url:q=>'https://www.bing.com/copilotsearch?q='+q}};\n"
-            "const DEFAULT_ENGINE='bing'; let engine='bing';\n"
-            "const markSearched=()=>{};\n"
-        )
-        # 场景1：有 API 且返回 true → 不调用 window.open
-        js1 = stub + "let opened=false; globalThis.window={pywebview:{api:{open_search:async()=>true}},open:()=>{opened=true}};\n" + snippet + "\nsearchGame('1').then(()=>console.log('opened='+opened));\n"
-        r1 = subprocess.run(["node", "-e", js1], capture_output=True, text=True,
-                            encoding="utf-8", timeout=20)
-        self.assertEqual(r1.returncode, 0, r1.stderr)
-        self.assertIn("opened=false", r1.stdout)
-
-        # 场景2：无 API → 回退 window.open
-        js2 = stub + "let opened=false; globalThis.window={open:()=>{opened=true}};\n" + snippet + "\nsearchGame('1').then(()=>console.log('opened='+opened));\n"
-        r2 = subprocess.run(["node", "-e", js2], capture_output=True, text=True,
-                            encoding="utf-8", timeout=20)
-        self.assertEqual(r2.returncode, 0, r2.stderr)
-        self.assertIn("opened=true", r2.stdout)
 
 
 class FailClosedTests(unittest.TestCase):
@@ -2717,7 +2648,7 @@ class WebEditorTests(unittest.TestCase):
 
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
         start = page.index("const SEARCH_QUERY_TPL=")
-        snippet = page[start:page.index("async function searchGame(")]
+        snippet = page[start:page.index("function searchGame(")]
         js = (
             "const origOf=d=>(d&&d.steam_original_name||'').trim()"
             "||(d&&d.original_name||'');\n"
