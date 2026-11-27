@@ -2682,14 +2682,35 @@ class WebEditorTests(unittest.TestCase):
         """行内 🔍 必须打开各引擎的 AI 搜索，而不是普通结果页。"""
         page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
         for marker in (
-            "chat.baidu.com/search?word=",      # 百度文心 AI 问答
             "bing.com/copilotsearch?q=",        # Bing Copilot Search
             "google.com/search?udm=50&q=",      # Google AI Mode
         ):
             self.assertIn(marker, page)
-        # 普通搜索入口不应再出现
-        self.assertNotIn("baidu.com/s?wd=", page)
+        # 百度文心对游戏名误判敏感词（如 Insurgency），已移除；只允许注释提及
+        self.assertNotIn("chat.baidu.com", page)
         self.assertNotIn("bing.com/search?q=", page)
+        self.assertNotIn('<option value="baidu"', page)
+        self.assertNotIn("ENGINES.baidu", page)
+
+    @unittest.skipUnless(shutil.which("node"), "需要 Node 执行前端 JS")
+    def test_stale_baidu_engine_falls_back(self):
+        """老用户 localStorage 存着已删除的 baidu，应回退到 bing。"""
+        import subprocess
+
+        page = (ROOT / "src" / "web" / "index.html").read_text(encoding="utf-8")
+        start = page.index("const ENGINES=")
+        snippet = page[start:page.index("function setEngine(")]
+        js = (
+            "globalThis.localStorage={getItem:()=>'baidu'};\n"
+            + snippet
+            + "\nconsole.log(engine); console.log(engineLabel());\n"
+        )
+        proc = subprocess.run(["node", "-e", js], capture_output=True,
+                              text=True, encoding="utf-8", timeout=20)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        lines = proc.stdout.strip().splitlines()
+        self.assertEqual(lines[0], "bing")
+        self.assertEqual(lines[1], "Bing AI")
 
     def test_topbar_button_order(self):
         """标题栏按钮顺序：刷新 → 保存台账 → 应用写入 → 静默同步 → 词库更新 → 退出服务。"""

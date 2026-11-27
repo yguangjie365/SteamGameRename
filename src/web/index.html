@@ -385,7 +385,6 @@ td.stcell{vertical-align:middle}
         <option value="200">200 / 页</option>
       </select>
       <select id="engineSel" onchange="setEngine(this.value)" title="行内 🔍 使用的 AI 搜索引擎" aria-label="AI 搜索引擎">
-        <option value="baidu">🔍 百度 AI</option>
         <option value="bing">🔍 Bing AI</option>
         <option value="google">🔍 Google AI</option>
       </select>
@@ -483,20 +482,21 @@ const CJK_DIGIT=/[\u3400-\u9fff\uf900-\ufaff][0-9]|[0-9][\u3400-\u9fff\uf900-\uf
 function spacingIssue(name){return CJK_DIGIT.test(name||'');}
 
 // 行内 🔍 一律走各引擎的 AI 搜索模式（2026-11 核对）：
-//   百度 chat.baidu.com/search?word=  → 文心助手 AI 问答（实测会自动发起搜索）
 //   Bing bing.com/copilotsearch?q=    → Copilot Search（微软官方 AI 搜索入口）
 //   Google /search?udm=50&q=          → AI Mode（udm=50 是官方 AI 模式参数）
+// 百度文心已移除：对游戏名（如 Insurgency）误判为敏感词，返回无关的合规警告。
 const ENGINES={
-  baidu:{label:'百度AI',url:q=>'https://chat.baidu.com/search?word='+encodeURIComponent(q)},
   bing:{label:'Bing AI',url:q=>'https://www.bing.com/copilotsearch?q='+encodeURIComponent(q)},
   google:{label:'Google AI',url:q=>'https://www.google.com/search?udm=50&q='+encodeURIComponent(q)}
 };
-let engine=(()=>{try{return localStorage.getItem('searchEngine')||'baidu';}catch(e){return 'baidu';}})();
-if(!ENGINES[engine])engine='baidu';
+const DEFAULT_ENGINE='bing';
+// 老用户 localStorage 里可能存着已删除的 'baidu'；这里统一回退到默认引擎。
+let engine=(()=>{try{return localStorage.getItem('searchEngine')||DEFAULT_ENGINE;}catch(e){return DEFAULT_ENGINE;}})();
+if(!ENGINES[engine])engine=DEFAULT_ENGINE;
 let searchedId=(()=>{try{return sessionStorage.getItem('searchedAppid')||'';}catch(e){return '';}})();
-function engineLabel(){return (ENGINES[engine]||ENGINES.baidu).label;}
+function engineLabel(){return (ENGINES[engine]||ENGINES[DEFAULT_ENGINE]).label;}
 function setEngine(v){
-  if(!ENGINES[v])v='baidu';
+  if(!ENGINES[v])v=DEFAULT_ENGINE;
   engine=v;
   try{localStorage.setItem('searchEngine',v);}catch(e){}
   const sel=document.getElementById('engineSel');
@@ -521,7 +521,7 @@ function searchGame(id){
   const q=buildSearchQuery(d);
   if(!q)return;
   markSearched(id);
-  window.open((ENGINES[engine]||ENGINES.baidu).url(q),'_blank','noopener,noreferrer');
+  window.open((ENGINES[engine]||ENGINES[DEFAULT_ENGINE]).url(q),'_blank','noopener,noreferrer');
 }
 function markSearched(id){
   searchedId=String(id);
