@@ -1819,6 +1819,79 @@ class SqliteStorageTests(unittest.TestCase):
                 "用户自定义字段必须保留",
             )
 
+    def test_write_ledger_upsert_removes_deleted_entries(self):
+        """UPSERT 后，从数据里移除的条目必须真的从库中删除。"""
+        import db as dbmod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = dbmod.connect(Path(tmp) / "renamer.db")
+            try:
+                data = self._ledger()
+                data["entries"]["651431"] = {
+                    "shard": "appinfo_00.vdf", "original_name": "TO BE REMOVED",
+                    "desired_name": "待删除", "approved": False,
+                }
+                dbmod.write_ledger(conn, data)
+                self.assertEqual(len(dbmod.read_ledger(conn)["entries"]), 2)
+
+                del data["entries"]["651431"]
+                dbmod.write_ledger(conn, data)
+                stored = dbmod.read_ledger(conn)["entries"]
+                self.assertEqual(list(stored), ["651430"])
+                self.assertEqual(stored["651430"]["desired_name"], "铁拳7")
+            finally:
+                conn.close()
+
+    def test_write_ledger_upsert_preserves_extra_fields_on_resave(self):
+        """重复保存不能丢掉 extra 里的用户自定义字段。"""
+        import db as dbmod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = dbmod.connect(Path(tmp) / "renamer.db")
+            try:
+                dbmod.write_ledger(conn, self._ledger())
+                data = dbmod.read_ledger(conn)
+                data["entries"]["651430"]["note"] = "改过的备注"
+                dbmod.write_ledger(conn, data)
+                stored = dbmod.read_ledger(conn)["entries"]["651430"]
+                self.assertEqual(stored["note"], "改过的备注")
+                self.assertEqual(stored["custom_field"], "用户自定义字段必须保留")
+            finally:
+                conn.close()
+
+    def test_write_ledger_upsert_handles_empty_ledger(self):
+        """空台账必须清空旧数据，且不能留下游离行。"""
+        import db as dbmod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = dbmod.connect(Path(tmp) / "renamer.db")
+            try:
+                dbmod.write_ledger(conn, self._ledger())
+                dbmod.write_ledger(conn, {"schema_version": 1, "entries": {}})
+                self.assertEqual(dbmod.read_ledger(conn)["entries"], {})
+                self.assertEqual(
+                    conn.execute("SELECT count(*) FROM ledger").fetchone()[0], 0
+                )
+            finally:
+                conn.close()
+
+    def test_migrated_at_is_iso_timestamp(self):
+        """迁移标记应是可读时间，而不是无意义的 '1'。"""
+        import db as dbmod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            conn = dbmod.connect(cfg / "renamer.db")
+            try:
+                dbmod.migrate_from_files(conn, cfg, ROOT / "src" / "defaults")
+                value = dbmod._get_meta(conn, "migrated_at")
+                self.assertIsNotNone(value)
+                self.assertNotEqual(value, "1")
+                self.assertIn("T", value)
+                self.assertEqual(value[4], "-")  # YYYY-MM-DDTHH:MM:SS
+            finally:
+                conn.close()
+
     def test_query_returns_only_owned_appids(self):
         import db as dbmod
 

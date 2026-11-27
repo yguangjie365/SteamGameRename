@@ -11,6 +11,7 @@ import json
 import shutil
 import sqlite3
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -171,34 +172,56 @@ def _load_json(text: str | None, fallback: Any) -> Any:
 # ---------------------------------------------------------------- ledger
 
 def write_ledger(conn: sqlite3.Connection, data: dict) -> None:
-    """Replace the ledger with `data` (same shape as names.json)."""
+    """Replace the ledger with `data` (same shape as names.json).
+
+    Uses UPSERT instead of DELETE+INSERT: unchanged rows are updated in place,
+    so saving one name no longer rewrites all 803 rows. The whole operation is
+    still one transaction; readers never observe an intermediate state.
+    """
     entries: dict[str, dict] = data.get("entries") or {}
+    rows = []
+    for key, record in entries.items():
+        if not str(key).isdigit():
+            continue
+        extra = {
+            name: value for name, value in record.items()
+            if name not in _LEDGER_FIELDS
+        }
+        rows.append((
+            int(key),
+            *[
+                _dump(record.get(name)) if name in _JSON_FIELDS
+                else (int(record[name]) if name in ("approved", "manual_override")
+                      and record.get(name) is not None
+                      else record.get(name))
+                for name in _LEDGER_FIELDS
+            ],
+            _dump(extra) if extra else None,
+        ))
+
+    columns = ", ".join(_LEDGER_FIELDS)
+    assignments = ", ".join(
+        f"{name}=excluded.{name}" for name in (*_LEDGER_FIELDS, "extra")
+    )
     with conn:
-        conn.execute("DELETE FROM ledger")
-        rows = []
-        for key, record in entries.items():
-            if not str(key).isdigit():
-                continue
-            extra = {
-                name: value for name, value in record.items()
-                if name not in _LEDGER_FIELDS
-            }
-            rows.append((
-                int(key),
-                *[
-                    _dump(record.get(name)) if name in _JSON_FIELDS
-                    else (int(record[name]) if name in ("approved", "manual_override")
-                          and record.get(name) is not None
-                          else record.get(name))
-                    for name in _LEDGER_FIELDS
-                ],
-                _dump(extra) if extra else None,
-            ))
-        conn.executemany(
-            f"INSERT INTO ledger(appid, {', '.join(_LEDGER_FIELDS)}, extra) "
-            f"VALUES({', '.join('?' * (len(_LEDGER_FIELDS) + 2))})",
-            rows,
-        )
+        if rows:
+            conn.executemany(
+                f"INSERT INTO ledger(appid, {columns}, extra) "
+                f"VALUES({', '.join('?' * (len(_LEDGER_FIELDS) + 2))}) "
+                f"ON CONFLICT(appid) DO UPDATE SET {assignments}",
+                rows,
+            )
+        # Only remove rows that are actually gone from the new data. Chunked
+        # to stay under SQLITE_MAX_VARIABLE_NUMBER for large ledgers.
+        keep = {row[0] for row in rows}
+        existing = {row[0] for row in conn.execute("SELECT appid FROM ledger")}
+        removed = sorted(existing - keep)
+        for start in range(0, len(removed), 500):
+            chunk = removed[start:start + 500]
+            conn.execute(
+                f"DELETE FROM ledger WHERE appid IN ({','.join('?' * len(chunk))})",
+                chunk,
+            )
         _set_meta(conn, "schema_version", str(data.get("schema_version", 1)))
         for key in ("meta", "defaults", "summary"):
             _set_meta(conn, key, json.dumps(data.get(key) or {}, ensure_ascii=False))
@@ -584,7 +607,9 @@ def migrate_from_files(
         for key in keys:
             _set_meta(conn, key, "{}")
     _set_meta(conn, "schema_version", "1")
-    _set_meta(conn, "migrated_at", "1")
+    _set_meta(
+        conn, "migrated_at", datetime.now(timezone.utc).isoformat(timespec="seconds")
+    )
     conn.commit()  # 上面的 _set_meta 不在 with 块内，必须显式提交
     return stats
 
