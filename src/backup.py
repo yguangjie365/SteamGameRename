@@ -62,6 +62,10 @@ def _steam_running_uncached() -> bool:
         # 无法确认状态时按"可能在运行"处理：宁可拒绝写入，也不要在 Steam
         # 运行时动缓存。只读接口仍然显示"未知/运行中"，不影响使用。
         return True
+    # tasklist 启动成功但返回非零（权限/系统错误）时，stdout 可能为空，
+    # 此时判"未运行"是 fail-open。和异常分支一致，按"可能在运行"处理。
+    if result.returncode != 0:
+        return True
     return b"steam.exe" in result.stdout.lower()
 
 
@@ -163,15 +167,16 @@ def create_backup(appinfo_dir: str | Path, backup_root: str | Path) -> Path:
     return destination
 
 
-def verify_backup(backup_dir: str | Path) -> dict:
-    folder = Path(backup_dir)
-    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+def _validate_manifest_structure(manifest: object, folder: Path) -> dict:
+    """清单的字段/版本/文件名校验。列表与恢复共用，不再各写一套。"""
+    if not isinstance(manifest, dict):
+        raise BackupError(f"备份清单不是对象: {folder}")
     version = manifest.get("manifest_version", 1)
     if version != 1:
         raise BackupError(
             f"备份清单版本 {version} 不受支持（当前程序只认 1）: {folder}"
         )
-    if "files" not in manifest:
+    if not isinstance(manifest.get("files"), dict):
         raise BackupError(f"备份清单缺 files 字段: {folder}")
     for name, digest in manifest["files"].items():
         if (
@@ -179,8 +184,18 @@ def verify_backup(backup_dir: str | Path) -> dict:
             or Path(name).name != name
             or name in (".", "..")
             or not (name.startswith("appinfo_") and name.endswith(".vdf"))
+            or not isinstance(digest, str)
         ):
             raise BackupError(f"备份清单含非法文件名 {name!r}: {folder}")
+    return manifest
+
+
+def verify_backup(backup_dir: str | Path) -> dict:
+    folder = Path(backup_dir)
+    manifest = _validate_manifest_structure(
+        json.loads((folder / "manifest.json").read_text(encoding="utf-8")), folder
+    )
+    for name, digest in manifest["files"].items():
         path = folder / name
         if not path.exists() or sha256_file(path) != digest:
             raise BackupError(f"backup file mismatch or missing: {name}")
@@ -218,6 +233,14 @@ def list_backups(backup_root: str | Path) -> list[dict]:
         except (OSError, json.JSONDecodeError):
             continue
         files = manifest.get("files", {})
+        # 与恢复路径用同一套校验：坏清单（路径穿越/类型错）不能让列表接口
+        # 读到备份目录之外的文件，也不能让整个 API 抛异常。
+        try:
+            manifest = _validate_manifest_structure(
+                json.loads(manifest_path.read_text(encoding="utf-8")), folder
+            )
+        except (OSError, ValueError, TypeError, KeyError, BackupError):
+            continue
         size = sum(
             (folder / name).stat().st_size
             for name in files

@@ -119,10 +119,11 @@ def make_handler(
         "message": "", "error": "",
     }
 
-    def _start_task(kind: str, worker) -> None:
+    def _start_task(kind: str, worker) -> bool:
+        """检查+置位原子化；返回 False 表示已有任务在跑（调用方回 409）。"""
         with task_lock:
             if task_state["running"]:
-                return
+                return False
             task_state.update(
                 running=True, kind=kind, done=0, total=0, message="启动中…", error=""
             )
@@ -139,6 +140,7 @@ def make_handler(
                     task_state["running"] = False
 
         threading.Thread(target=_run, daemon=True).start()
+        return True
 
     class Handler(BaseHTTPRequestHandler):
         # 客户端声明了 Content-Length 却不发字节时，默认会永久阻塞一个线程；
@@ -326,11 +328,6 @@ def make_handler(
                 return
 
             if path == "/api/update-community":
-                with task_lock:
-                    if task_state["running"]:
-                        self._json(409, {"error": "已有联网任务在运行"})
-                        return
-
                 def _update_worker() -> None:
                     with task_lock:
                         task_state["message"] = "正在下载社区词库…"
@@ -343,7 +340,9 @@ def make_handler(
                     with _plan_lock:
                         _plan_cache.clear()
 
-                _start_task("update-community", _update_worker)
+                if not _start_task("update-community", _update_worker):
+                    self._json(409, {"error": "已有联网任务在运行"})
+                    return
                 self._json(202, {"message": "已开始更新社区词库"})
                 return
 
@@ -353,11 +352,6 @@ def make_handler(
                 if not isinstance(limit, int) or not (1 <= limit <= 500):
                     self._json(400, {"error": "limit 必须在 1-500 之间"})
                     return
-                with task_lock:
-                    if task_state["running"]:
-                        self._json(409, {"error": "已有联网任务在运行"})
-                        return
-
                 def _fetch_worker() -> None:
                     from shard import app_names
                     from mapping import scan_shards
@@ -380,7 +374,9 @@ def make_handler(
                     with _plan_lock:
                         _plan_cache.clear()
 
-                _start_task("fetch-store", _fetch_worker)
+                if not _start_task("fetch-store", _fetch_worker):
+                    self._json(409, {"error": "已有联网任务在运行"})
+                    return
                 self._json(202, {"message": "已开始补全商店中文名"})
                 return
 

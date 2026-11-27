@@ -2261,6 +2261,50 @@ class WriteGuardTests(unittest.TestCase):
             self.assertEqual((appinfo / "appinfo_00.vdf").read_bytes(), original)
 
 
+class FailClosedTests(unittest.TestCase):
+    """第五轮审查的三处 fail-closed / 清单校验修复。"""
+
+    def test_tasklist_nonzero_returncode_fails_closed(self):
+        """tasklist 启动成功但返回非零时，不能把 stdout 为空当作 Steam 未运行。"""
+        import os as osmod
+        from unittest import mock
+
+        import backup
+
+        with mock.patch.object(osmod, "name", "nt"), \
+                mock.patch.object(backup.subprocess, "run",
+                                  return_value=mock.Mock(returncode=1, stdout=b"", stderr=b"err")):
+            backup._last_steam_check = None
+            self.assertTrue(backup.steam_running(ttl=0))
+
+    def test_tasklist_zero_returncode_no_steam(self):
+        import os as osmod
+        from unittest import mock
+
+        import backup
+
+        return_value = mock.Mock(returncode=0, stdout=b"INFO: No tasks are running.")
+        with mock.patch.object(osmod, "name", "nt"), \
+                mock.patch.object(backup.subprocess, "run", return_value=return_value):
+            backup._last_steam_check = None
+            self.assertFalse(backup.steam_running(ttl=0))
+
+    def test_list_backups_skips_malicious_manifest(self):
+        """坏清单（路径穿越）应被跳过，而不是让列表接口读到备份目录之外。"""
+        from backup import list_backups
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "backups"
+            bad = root / "20260101-000001"
+            bad.mkdir(parents=True)
+            (bad / "manifest.json").write_text(
+                json.dumps({"created_at": "20260101-000001",
+                            "files": {"../outside.vdf": "x"}}),
+                encoding="utf-8",
+            )
+            self.assertEqual(list_backups(root), [])
+
+
 class PlatformGuardTests(unittest.TestCase):
     def test_non_windows_write_is_refused(self):
         """非 Windows 上 steam_running 恒为 False，必须显式拒绝而非静默放行。"""

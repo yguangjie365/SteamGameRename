@@ -10,8 +10,8 @@ Design notes:
 * The guard polls `steam_running()` every 30 s instead of using watchdog:
   watchdog can only watch files, and watching APPCache would fire *while*
   Steam writes it — exactly when we must not touch it.
-* Missing GUI dependencies degrade to the existing browser mode instead of
-  failing, so a source checkout without extras still works.
+* Missing GUI dependencies are reported with an explicit pip command and a
+  non-zero exit (no browser fallback since v0.5.3).
 
 Usage:
     python run_desktop.py
