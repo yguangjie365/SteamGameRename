@@ -114,21 +114,23 @@ class HardeningTests(unittest.TestCase):
         self.assertEqual(item.desired_name, "新版译名")
         self.assertEqual(item.status, "suggested")
 
-    def test_ledger_base_name_falls_back_when_library_missing(self):
-        """词库全部落空（如 NO_DB 模式）时，台账缓存仍是兜底来源。"""
+    def test_library_gap_leaves_base_empty(self):
+        """官方与社区词库都没有时建议名留空（no_zh），不回退台账缓存。"""
         names = {
             "schema_version": 1,
             "defaults": {"mapping_priority": ["community"]},
             "entries": {
+                # 台账缓存是派生快照，不参与建议名合成
                 "443510": {"base_name": "缓存兜底名", "source": "community"},
             },
         }
         plan = build_plan(
-            FIXTURES, names, include_no_zh=False, community_names={},
+            FIXTURES, names, include_no_zh=True, community_names={},
         )
         item = next(p for p in plan if p.appid == 443510)
-        self.assertEqual(item.base_name, "缓存兜底名")
-        self.assertEqual(item.desired_name, "缓存兜底名")
+        self.assertEqual(item.base_name, "")
+        self.assertEqual(item.status, "no_zh")
+        self.assertFalse(item.approved)
 
     def test_community_names_priority_over_stale_english_base(self):
         from mapping import load_community_names
@@ -864,7 +866,8 @@ class SharedNamesTests(unittest.TestCase):
         self.assertTrue(names_match("911 接线员", "911接线员"))
         self.assertFalse(names_match("半衰期", "半衰期 2"))
 
-    def test_new_user_gets_shared_source(self):
+    def test_shared_csv_never_beats_official_localization(self):
+        """v0.9.0 语义：官方本地化优先，共享 CSV 不再抢占建议名。"""
         from game_names import load_shared_names
         from mapping import build_plan
         from paths import asset_dir
@@ -876,9 +879,14 @@ class SharedNamesTests(unittest.TestCase):
         plan = build_plan(
             FIXTURES, names, shared=shared
         )
-        row = next(p for p in plan if p.appid == 2342040)
-        self.assertEqual(row.source, "shared_csv")
-        self.assertEqual(row.desired_name, "猛兽派对")
+        # 2342040 官方 schinese =「猛兽派对 - 豪华版升级包」；共享 CSV 只写「猛兽派对」
+        official = next(p for p in plan if p.appid == 2342040)
+        self.assertEqual(official.source, "local_schinese")
+        self.assertEqual(official.base_name, "猛兽派对 - 豪华版升级包")
+        # 443510 官方与社区都没有 → 建议名留空
+        gap = next(p for p in plan if p.appid == 443510)
+        self.assertEqual(gap.base_name, "")
+        self.assertEqual(gap.status, "no_zh")
 
     def test_shared_source_can_be_disabled(self):
         from game_names import load_shared_names

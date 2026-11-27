@@ -418,17 +418,13 @@ def _plan_entry(
             note=note or "该条目在 Steam 数据中没有名称字段，暂不支持改名",
         )
 
-    # 建议名始终实时按 mapping_priority 从词库/本地化合成（community_names、
-    # store_cache、shared_names 更新后立即反映到计划），台账里缓存的 base_name
-    # 只在词库全部落空时兜底（如 NO_DB 模式），不再优先于词库。
+    # 建议名始终实时按 mapping_priority 从官方本地化/商店/社区词库合成；
+    # 全部落空则留空（no_zh），不再回退台账缓存快照。
     base, source = resolve_base(
         original, localized, priority,
         community_names=community_names, store_cache=store_cache,
         appid=entry.appid, shared_names=shared_names,
     )
-    if not base:
-        base = record.get("base_name") or ""
-        source = record.get("source", "")
     if base and not CJK.search(base):
         # Steam 本地化或兜底缓存可能是英文原文（schinese 未翻译时 Valve 回英文）
         base, source = "", ""
@@ -449,17 +445,9 @@ def _plan_entry(
             applied=is_approved and in_file, in_file=in_file,
         )
 
-    if not base:
-        if not include_no_zh:
-            return None
-        return PlanEntry(
-            **common, base_name="", desired_name="",
-            source=source or "none", targets=targets, note=note,
-            status="no_zh", approved=False,
-        )
-
     recorded_desired = (record.get("desired_name") or "").strip()
     if record.get("approved") and recorded_desired:
+        # 已批准条目：即使建议名落空（官方与词库都没有），批准的目标名仍有效
         desired = recorded_desired
         if not CJK.search(desired):
             note = note or "手动批准的目标名不含中文，请确认是否符合预期"
@@ -468,6 +456,15 @@ def _plan_entry(
     else:
         if record.get("approved") and not recorded_desired:
             note = note or "台账标记为已批准但目标名为空，请重新采纳建议或输入自定义名称"
+        if not base:
+            # 官方本地化与词库都没有：建议名留空，由用户自定义或保持原名
+            if not include_no_zh:
+                return None
+            return PlanEntry(
+                **common, base_name="", desired_name="",
+                source=source or "none", targets=targets, note=note,
+                status="no_zh", approved=False,
+            )
         desired = base
         approved = False
         status = "unchanged" if desired == original else "suggested"
@@ -503,14 +500,21 @@ def build_plan(
 ) -> list[PlanEntry]:
     defaults = names.get("defaults", {})
     records = names.get("entries", {})
+    # 建议名取值语义（v0.9.0 定版）：官方优先——Steam 本地化 → 原名即中文 →
+    # 商店官方名 → 社区词库；全部落空则建议名留空（no_zh），由用户自定义。
     priority = list(defaults.get("mapping_priority", [
-        "local_schinese", "local_sc_schinese", "community", "store_api",
+        "local_schinese", "local_sc_schinese", "common_name", "store_api",
+        "community",
     ]))
     # 老用户的 names.json 写死了优先级，新来源默认自动插入 common_name 之后；
     # 显式设置 defaults.use_shared_names=false 即可关闭。
+    # 共享 CSV 是个人附加词库，排在官方与社区词库之后，不抢占建议名。
     if shared and defaults.get("use_shared_names", True):
         if "shared_csv" not in priority:
-            anchor = priority.index("user_override") + 1 if "user_override" in priority else 0
+            if "community" in priority:
+                anchor = priority.index("community") + 1
+            else:
+                anchor = len(priority)
             priority.insert(anchor, "shared_csv")
     elif shared:
         priority = [p for p in priority if p != "shared_csv"]

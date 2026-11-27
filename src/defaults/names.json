@@ -15,12 +15,12 @@
     "write_sortas_pinyin": false,
     "mapping_priority": [
       "user_override",
-      "shared_csv",
       "local_schinese",
       "local_sc_schinese",
       "common_name",
+      "store_api",
       "community",
-      "store_api"
+      "shared_csv"
     ]
   },
   "summary": {},
