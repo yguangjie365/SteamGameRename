@@ -388,6 +388,28 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("from steam_locator import detect_steam_dir", cli)
         self.assertNotIn(r"D:\Steam", cli)
 
+    def test_export_ledger_works_without_steam(self):
+        """纯台账命令不依赖 Steam 目录（CI runner 上没有 Steam）。"""
+        import cli
+        from typer.testing import CliRunner
+        from unittest import mock
+        import os as osmod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp)
+            (cfg / "names.json").write_text(
+                '{"schema_version":1,"entries":{},"defaults":{},"summary":{}}',
+                encoding="utf-8",
+            )
+            out = cfg / "out.json"
+            with mock.patch.dict(osmod.environ, {"STEAM_DIR": r"Z:\NoSteam"}):
+                result = CliRunner().invoke(
+                    cli.app,
+                    ["--config-dir", str(cfg), "export-ledger", "-o", str(out)],
+                )
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertTrue(out.exists())
+
     def test_source_distribution_excludes_runtime_data(self):
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
         for line in manifest.splitlines():

@@ -87,6 +87,11 @@ class CliExit(Exception):
 
 def _context(ctx: typer.Context) -> tuple[Path, Path, Path]:
     state = ctx.obj
+    if not state.get("steam_dir"):
+        raise typer.BadParameter(
+            "未能定位 Steam 安装目录；请用 --steam-dir 指定，"
+            "或设置环境变量 STEAM_DIR"
+        )
     return (
         Path(state["steam_dir"]) / "APPCache" / "APPInfo",
         Path(state["config_dir"]),
@@ -112,13 +117,10 @@ def global_options(
         found, source = Path(steam_dir), "命令行参数"
     else:
         found, source = detect_steam_dir(None, load_settings())
-    if found is None:
-        raise typer.BadParameter(
-            "未能定位 Steam 安装目录；请用 --steam-dir 指定，"
-            "或设置环境变量 STEAM_DIR"
-        )
+    # 探测失败不在这里报错：export-ledger / export-mappings 等纯台账命令
+    # 不需要 Steam，只有 _context() 消费 steam_dir 的命令才需要它。
     ctx.obj = {
-        "steam_dir": str(found),
+        "steam_dir": str(found) if found is not None else "",
         "steam_dir_source": source,
         "config_dir": ensure_config(config_dir),
         "backup_root": backup_root,
