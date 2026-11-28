@@ -2888,14 +2888,12 @@ class WebEditorTests(unittest.TestCase):
         with_appid, without = proc.stdout.strip().splitlines()
         self.assertIn("Steam 游戏《Caribbean Crashers》", with_appid)
         self.assertIn("（AppID 347100）", with_appid)
-        self.assertIn("中文名称是什么", with_appid)
-        # 三级取值链：官方中文名优先 → 社区公认译名（须注明"社区译名"）→
-        # 都没有才承认没有，且不得自己生造翻译（防 AI 编造"看起来像官方"的译名）
-        self.assertIn("官方中文名", with_appid)
+        self.assertIn("有官方简体中文名吗", with_appid)
+        # 三级取值链（疑问式）：官方中文名优先 → 玩家社区普遍译名（3DM 等）→
+        # 要求注明官方名还是社区译名。必须是疑问式——祈使指令会触发
+        # Google AI 模式的防提示注入确认弹窗
+        self.assertIn("官方中文名还是社区译名", with_appid)
         self.assertIn("3DM", with_appid)
-        self.assertIn("社区译名", with_appid)
-        self.assertIn("不要自己生造翻译", with_appid)
-        self.assertIn("无公认中文名", with_appid)
         self.assertNotIn("AppID", without)
         self.assertIn("Fallback Name", without)
 
