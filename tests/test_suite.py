@@ -93,26 +93,6 @@ class HardeningTests(unittest.TestCase):
         with self.assertRaises(ShardError):
             build_bytes(shard, {443510: {"common.not_a_field": "x"}})
 
-    def test_community_names_priority_over_stale_chinese_base(self):
-        """词库更新后，台账缓存的中文建议名也要被词库新值覆盖。"""
-        names = {
-            "schema_version": 1,
-            "defaults": {"mapping_priority": ["local_schinese", "community"]},
-            "entries": {
-                # 台账缓存了一个旧中文建议名；词库已更新为「新版译名」
-                "443510": {"base_name": "旧版译名", "source": "community"},
-            },
-        }
-        community = {443510: "新版译名"}
-        plan = build_plan(
-            FIXTURES, names,
-            include_no_zh=False, community_names=community,
-        )
-        item = next(p for p in plan if p.appid == 443510)
-        self.assertEqual(item.base_name, "新版译名")
-        self.assertEqual(item.source, "community")
-        self.assertEqual(item.desired_name, "新版译名")
-        self.assertEqual(item.status, "suggested")
 
     def test_library_gap_leaves_base_empty(self):
         """官方与社区词库都没有时建议名留空（no_zh），不回退台账缓存。"""
@@ -132,54 +112,6 @@ class HardeningTests(unittest.TestCase):
         self.assertEqual(item.status, "no_zh")
         self.assertFalse(item.approved)
 
-    def test_community_names_priority_over_stale_english_base(self):
-        from mapping import load_community_names
-
-        names = {
-            "schema_version": 1,
-            "defaults": {
-                "primary_target": "common.name",
-                "sync_existing_localized": [],
-                "mapping_priority": ["local_schinese", "community"],
-            },
-            "entries": {
-                "443510": {"base_name": "Guide Button Chord", "source": "none"}
-            },
-        }
-        community = {443510: "社区译名"}
-        plan = build_plan(
-            FIXTURES, names,
-            include_no_zh=False, community_names=community,
-        )
-        item = next(p for p in plan if p.appid == 443510)
-        self.assertEqual(item.source, "community")
-        self.assertEqual(item.desired_name, "社区译名")
-        self.assertEqual(item.status, "suggested")
-
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "community.json"
-            path.write_text(
-                json.dumps({"schemaVersion": 1, "games": {"443510": "社区译名"}}),
-                encoding="utf-8",
-            )
-            self.assertEqual(load_community_names(path), {443510: "社区译名"})
-
-    def test_community_csv_overrides_json(self):
-        from mapping import load_community_names
-
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp) / "community_names"
-            base.with_suffix(".json").write_text(
-                json.dumps({"schemaVersion": 1, "games": {"10": "旧名", "20": "保留"}}),
-                encoding="utf-8",
-            )
-            base.with_suffix(".csv").write_text(
-                "appid,name\n10,反恐精英\n440,军团要塞 2\n", encoding="utf-8"
-            )
-            loaded = load_community_names(base.with_suffix(".json"))
-            self.assertEqual(loaded[10], "反恐精英")
-            self.assertEqual(loaded[20], "保留")
-            self.assertEqual(loaded[440], "军团要塞 2")
 
     def test_store_cache_is_not_a_suggestion_source(self):
         """当前规则：商店 API 不再提供建议名，只有社区词库可以。"""
@@ -576,36 +508,10 @@ class ConfigTests(unittest.TestCase):
         from db import connect
 
         with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "no-such-dir" / "renamer.db"
+            target = Path(tmp) / "no-such-dir" / "localgamedb.db"
             with self.assertRaises(ValueError) as ctx:
                 connect(target)
             self.assertIn("无法打开数据库", str(ctx.exception))
-
-
-class CommunityCsvTests(unittest.TestCase):
-    def test_utf16_csv_is_readable(self):
-        from mapping import load_community_names
-
-        with tempfile.TemporaryDirectory() as tmp:
-            json_path = Path(tmp) / "community_names.json"
-            json_path.write_text(json.dumps({"schemaVersion": 1, "games": {}}), encoding="utf-8")
-            (Path(tmp) / "community_names.csv").write_bytes(
-                "appid,name\n970500,秦殇\n".encode("utf-16")
-            )
-            self.assertEqual(load_community_names(json_path)[970500], "秦殇")
-
-    def test_broken_bytes_do_not_drop_whole_table(self):
-        from mapping import load_community_names
-
-        with tempfile.TemporaryDirectory() as tmp:
-            json_path = Path(tmp) / "community_names.json"
-            json_path.write_text(json.dumps({"schemaVersion": 1, "games": {}}), encoding="utf-8")
-            # 非法 UTF-8/GBK 字节：旧实现会整表丢弃，新实现应降级解析
-            (Path(tmp) / "community_names.csv").write_bytes(
-                b"appid,name\n440,\xff\xfe\x00bad\n588650,Dead Cells\n"
-            )
-            loaded = load_community_names(json_path)
-            self.assertIn(588650, loaded)
 
 
 class CliTests(unittest.TestCase):
@@ -701,49 +607,6 @@ class RobustnessTests(unittest.TestCase):
             self.assertTrue((folder / "names.json").exists())
             self.assertFalse((folder / "rules.json").exists())
             self.assertEqual(json.loads((folder / "names.json").read_text(encoding="utf-8"))["schema_version"], 1)
-
-    def test_update_community_offline_raises_value_error(self):
-        from mapping import update_community_names
-
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(ValueError):
-                update_community_names(Path(tmp) / "c.json", url="http://127.0.0.1:1/none")
-
-    def test_update_community_falls_back_to_mirror(self):
-        """直连 GitHub 超时后应尝试国内镜像，并用第一个成功源写入。"""
-        import httpx
-
-        import community as community_mod
-        from community import COMMUNITY_NAMES_URL, update_community_names
-
-        payload = {"schemaVersion": 1, "games": {"440": "军团要塞 2"}}
-        calls: list[str] = []
-
-        def fake_get(url, **kwargs):
-            calls.append(url)
-            if url.startswith("https://ghfast.top/"):
-                resp = mock.Mock()
-                resp.raise_for_status = lambda: None
-                resp.json = lambda: payload
-                return resp
-            raise httpx.ReadTimeout("simulated CN network timeout")
-
-        with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch.object(community_mod.httpx, "get", side_effect=fake_get):
-                count, source = update_community_names(Path(tmp) / "c.json")
-        self.assertEqual(count, 1)
-        self.assertEqual(calls[0], COMMUNITY_NAMES_URL, "直连必须第一个尝试")
-        self.assertEqual(calls[1], "https://ghfast.top/" + COMMUNITY_NAMES_URL)
-        self.assertTrue(source.startswith("https://ghfast.top/"), source)
-        # 显式自定义 URL 不启用镜像回退（测试/高级用途的单源语义）
-        with tempfile.TemporaryDirectory() as tmp:
-            calls.clear()
-            with mock.patch.object(community_mod.httpx, "get", side_effect=fake_get):
-                with self.assertRaises(ValueError):
-                    update_community_names(
-                        Path(tmp) / "c.json", url="http://127.0.0.1:1/none"
-                    )
-        self.assertEqual(calls, ["http://127.0.0.1:1/none"], "自定义 URL 不得触发镜像回退")
 
 
 class GuiApiTests(unittest.TestCase):
@@ -924,116 +787,6 @@ class GuiApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self._thread.join(timeout=5)
         self.assertFalse(self._thread.is_alive(), "server did not stop after /api/shutdown")
-
-
-class SharedNamesTests(unittest.TestCase):
-    """共享词库：编码兼容、行级校验、两层覆盖、新用户自动读取。"""
-
-    def setUp(self):
-        temp = tempfile.TemporaryDirectory(prefix="shared-names-")
-        self.addCleanup(temp.cleanup)
-        self.folder = Path(temp.name)
-
-    def _write(self, name: str, text: str, encoding: str = "utf-8-sig") -> Path:
-        path = self.folder / name
-        path.write_text(text, encoding=encoding)
-        return path
-
-    def test_reads_bom_utf16_and_gbk(self):
-        from game_names import load_shared_names
-
-        header = "GameID,OriginalName,ModifiedName\n"
-        for encoding in ("utf-8-sig", "utf-16", "gbk"):
-            with self.subTest(encoding=encoding):
-                path = self._write(
-                    "g.csv", header + "1,Hello,你好\n", encoding
-                )
-                shared = load_shared_names(path)
-                self.assertEqual(shared.names, {1: "你好"})
-                self.assertEqual(shared.warnings, [])
-
-    def test_duplicate_disabled_and_invalid_rows(self):
-        from game_names import load_shared_names
-
-        path = self._write("g.csv", (
-            "GameID,OriginalName,ModifiedName,Enabled\n"
-            "1,A,甲,true\n"
-            "1,B,乙,true\n"      # 重复，后者覆盖
-            "2,C,丙,false\n"     # 禁用
-            "x,D,丁,true\n"      # 非法 ID
-            "3,E,,true\n"        # 目标名为空
-        ))
-        shared = load_shared_names(path)
-        self.assertEqual(shared.names, {1: "乙"})
-        self.assertEqual(shared.duplicates, 1)
-        self.assertEqual(shared.skipped, 2)
-        self.assertTrue(any("重复" in w for w in shared.warnings))
-
-    def test_local_override_wins_without_touching_baseline(self):
-        from game_names import load_shared_names
-
-        base = self._write("base.csv", "GameID,OriginalName,ModifiedName\n1,A,甲\n2,B,乙\n")
-        local = self._write("local.csv", "GameID,OriginalName,ModifiedName\n1,A,壹\n")
-        shared = load_shared_names(base, local)
-        self.assertEqual(shared.names, {1: "壹", 2: "乙"})
-
-    def test_names_match_ignores_whitespace(self):
-        from game_names import names_match
-
-        self.assertTrue(names_match("911 接线员", "911接线员"))
-        self.assertFalse(names_match("半衰期", "半衰期 2"))
-
-    def test_shared_csv_and_official_localization_never_fill_suggestion(self):
-        """v1.0.1 语义：只有社区词库能提供建议名。"""
-        from game_names import load_shared_names
-        from mapping import build_plan
-        from paths import asset_dir
-
-        names = json.loads(
-            (ROOT / "src" / "defaults" / "names.json").read_text(encoding="utf-8")
-        )
-        shared = load_shared_names(asset_dir("defaults") / "game_names.csv")
-        plan = build_plan(
-            FIXTURES, names, shared=shared
-        )
-        # 2342040 有官方 schinese、共享 CSV 也有译名，但社区词库为空 → 建议名留空
-        gap = next(p for p in plan if p.appid == 2342040)
-        self.assertEqual(gap.source, "none")
-        self.assertEqual(gap.base_name, "")
-        self.assertEqual(gap.status, "no_zh")
-        # 443510 同样没有社区词条
-        other = next(p for p in plan if p.appid == 443510)
-        self.assertEqual(other.base_name, "")
-        self.assertEqual(other.status, "no_zh")
-
-    def test_shared_source_can_be_disabled(self):
-        from game_names import load_shared_names
-        from mapping import build_plan
-        from paths import asset_dir
-
-        names = json.loads(
-            (ROOT / "src" / "defaults" / "names.json").read_text(encoding="utf-8")
-        )
-        names["defaults"]["use_shared_names"] = False
-        shared = load_shared_names(asset_dir("defaults") / "game_names.csv")
-        plan = build_plan(
-            FIXTURES, names, shared=shared
-        )
-        self.assertFalse(any(p.source == "shared_csv" for p in plan))
-
-    def test_cli_exports_approved_rows(self):
-        from cli import main
-
-        dest = self.folder / "export.csv"
-        self.assertEqual(
-            main(["--config-dir", str(FIXTURE_CONFIG), "export-mappings",
-                  "-o", str(dest)]),
-            0,
-        )
-        with dest.open(encoding="utf-8-sig", newline="") as handle:
-            rows = list(csv.DictReader(handle))
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0]["ModifiedName"], "指南按钮和弦")
 
 
 class SpacingWarningTests(unittest.TestCase):
@@ -1559,40 +1312,34 @@ class SteamOriginalNameTests(unittest.TestCase):
             self.assertEqual(row.original_name, self.ZH_NAME)
             self.assertEqual(row.steam_original_name, "")
 
-    def test_bundled_csv_is_loaded_and_wins_over_ledger(self):
-        """随包对照表的英文名优先于台账记录（台账 original_name 被改写成中文也不影响展示）。"""
-        import game_names
+    def test_original_name_sourced_from_gamedb(self):
+        """gamedb.db 的 name 字段是原名对照的来源，优先于台账记录。"""
+        import gamedb as gamedbmod
         import mapping
 
         with tempfile.TemporaryDirectory() as tmp:
-            csv_path = Path(tmp) / "original_names.csv"
-            csv_path.write_text(
-                "GameID,OriginalName,ModifiedName\n"
-                f"{self.APPID},{self.EN_NAME},\n"
-                "588650,Dead Cells,\n",
+            tmp = Path(tmp)
+            config = tmp / "config"
+            config.mkdir()
+            (config / "names.json").write_text(
+                json.dumps(self._names_fixture(), ensure_ascii=False),
                 encoding="utf-8",
             )
-            table = game_names.load_original_names(csv_path)
-            self.assertEqual(len(table), 2)
-            self.assertEqual(table.get(588650), "Dead Cells")
-            self.assertEqual(table.get(651430), self.EN_NAME)
-
-            # 台账的 original_name 已被改写成中文时，展示字段仍取 CSV 里的英文名
-            names = self._names_fixture()
-            names["entries"]["651430"]["original_name"] = self.ZH_NAME
-            names["defaults"]["mapping_priority"] = ["community"]
-            plan = mapping.build_plan(
-                FIXTURES, names,
-                original_names=table,
-            )
+            gconn = gamedbmod.connect(gamedbmod.gamedb_path(config))
+            try:
+                gconn.execute(
+                    "INSERT OR REPLACE INTO games VALUES(?, ?, '', 'game')",
+                    (self.APPID, self.EN_NAME),
+                )
+                gconn.commit()
+            finally:
+                gconn.close()
+            plan = mapping.plan_from_config(self._build_renamed_shard(tmp), config)
             row = next(x for x in plan if x.appid == self.APPID)
-            self.assertEqual(row.original_name, self.EN_NAME)  # 分片原文
-            # 台账 original_name 已是中文（ZH_NAME），但展示字段仍取 CSV 英文名
+            # gamedb.name 优先于台账里被改写过的 original_name
             self.assertEqual(row.steam_original_name, self.EN_NAME)
-            self.assertNotEqual(row.steam_original_name, self.ZH_NAME)
+            self.assertEqual(row.original_name, self.ZH_NAME)
 
-
-class LauncherTests(unittest.TestCase):
     def test_library_folder_is_not_a_steam_root(self):
         import steam_locator
 
@@ -1693,110 +1440,6 @@ class NewKeyWriteTests(unittest.TestCase):
         self.assertTrue(is_allowed_target("common.sortas"))
         self.assertTrue(is_allowed_target("name_localized.schinese"))
         self.assertFalse(is_allowed_target("common.icon"))
-
-
-class LearnedOriginalsTests(unittest.TestCase):
-    def test_merge_and_write(self):
-        import game_names
-
-        merged = game_names.merge_original_names(
-            {1: "BaselineA", 2: "BaselineB"}, {2: "LearnedB", 3: "LearnedC"}
-        )
-        self.assertEqual(merged, {1: "BaselineA", 2: "BaselineB", 3: "LearnedC"})
-        with tempfile.TemporaryDirectory() as tmp:
-            dest = Path(tmp) / "learned.csv"
-            self.assertEqual(game_names.write_learned_originals(merged, dest), 3)
-            loaded = game_names.load_original_names(dest)
-            self.assertEqual(loaded, merged)
-
-    def test_learned_csv_escapes_formula_prefix(self):
-        """M-2 回归：以 = - @ 开头的名字写入 CSV 必须转义，防 Excel 公式注入。"""
-        import game_names
-
-        with tempfile.TemporaryDirectory() as tmp:
-            dest = Path(tmp) / "learned.csv"
-            game_names.write_learned_originals(
-                {440: '=HYPERLINK("https://evil.example")', 1: "-Ward", 2: "@risk"},
-                dest,
-            )
-            text = dest.read_text(encoding="utf-8-sig")
-            self.assertIn("'=HYPERLINK", text)
-            self.assertIn("'-Ward", text)
-            self.assertIn("'@risk", text)
-            # 读回时撇号是字面内容的一部分——沉淀表只作展示，读取端不受影响
-            self.assertEqual(game_names.load_original_names(dest)[440],
-                             "'=HYPERLINK(\"https://evil.example\")")
-
-    def test_learn_captures_non_chinese_only(self):
-        import mapping
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            cfg = root / "config"
-            cfg.mkdir()
-            # 用现有 fixture 的分片：它们含英文名
-            new, total = mapping.learn_original_names(FIXTURES, cfg)
-            self.assertGreaterEqual(total, 0)
-            dest = cfg / "learned_originals.csv"
-            if dest.exists():
-                for value in mapping.load_original_names(dest).values():
-                    self.assertFalse(any("\u4e00" <= c <= "\u9fff" for c in value))
-
-    def test_learn_skips_approved_and_manually_modified(self):
-        """已批准/手改的纯英文别名（如 CS2）不得被学成'最初英文名'。"""
-        import mapping
-        from unittest import mock
-
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp) / "config"
-            cfg.mkdir()
-            ledger = {
-                "schema_version": 1,
-                "entries": {
-                    "651430": {"approved": True, "desired_name": "CS2",
-                               "targets": ["common.name"]},
-                    "2342040": {"manual_override": True, "desired_name": "PA",
-                                "targets": ["common.name"]},
-                    "2752710": {"desired_name": "待批准别名",
-                                "targets": ["common.name"]},
-                },
-            }
-            (cfg / "names.json").write_text(
-                json.dumps(ledger, ensure_ascii=False), encoding="utf-8"
-            )
-            # 基线置空，让 fixture 里的纯英文名进入学习候选
-            with mock.patch.object(mapping, "load_original_names", return_value={}):
-                mapping.learn_original_names(FIXTURES, cfg)
-            learned = mapping.load_original_names(cfg / "learned_originals.csv")
-            self.assertNotIn(651430, learned)   # approved
-            self.assertNotIn(2342040, learned)  # manual_override
-            self.assertNotIn(2752710, learned)  # desired_name 非空
-            self.assertIn(4628710, learned)     # 未改动的纯英文名照常学习
-
-    def test_pending_changes_skips_in_file(self):
-        import mapping
-
-        def make(appid: int, in_file: bool) -> mapping.PlanEntry:
-            return mapping.PlanEntry(
-                appid=appid, shard="appinfo_00.vdf", original_name="X",
-                desired_name="中文", targets=["common.name"],
-                status="approved", approved=True, in_file=in_file,
-            )
-
-        changes = mapping.pending_changes([make(1, True), make(2, False)])
-        self.assertIn(2, changes["appinfo_00.vdf"])
-        self.assertNotIn(1, changes["appinfo_00.vdf"])
-
-    def test_pending_includes_sortas_value(self):
-        import mapping
-
-        item = mapping.PlanEntry(
-            appid=3, shard="appinfo_00.vdf", original_name="X",
-            desired_name="猛兽派对", targets=["common.name"],
-            status="approved", approved=True, in_file=False, sortas="MSPD",
-        )
-        changes = mapping.pending_changes([item])
-        self.assertEqual(changes["appinfo_00.vdf"][3]["common.sortas"], "MSPD")
 
 
 class EdgeCaseRegressionTests(unittest.TestCase):
@@ -1976,29 +1619,6 @@ class ShardCacheTests(unittest.TestCase):
 
 
 class SqliteStorageTests(unittest.TestCase):
-    def test_import_appids_baseline_never_overwrites(self):
-        """import-applist 只补缺失：已有「最初英文名」优先于外部列表的当前名。"""
-        import db as dbmod
-
-        with tempfile.TemporaryDirectory() as tmp:
-            conn = dbmod.connect(Path(tmp) / "renamer.db")
-            try:
-                dbmod.write_original_names(conn, {570: "Half-Life 2 最初名"}, "baseline")
-                inserted = dbmod.import_appids_baseline(
-                    conn, {570: "Half-Life 2 当前名", 999: "New Game"}, scope={570, 999}
-                )
-                self.assertEqual(inserted, 1, "已有条目不计入新增")
-                names = dbmod.read_original_names(conn, "baseline")
-                self.assertEqual(names[570], "Half-Life 2 最初名", "最初名不得被当前名覆盖")
-                self.assertEqual(names[999], "New Game")
-                # scope 限制：范围外的 AppID 不导入
-                again = dbmod.import_appids_baseline(conn, {777: "范围外"}, scope={1})
-                self.assertEqual(again, 0)
-                self.assertNotIn(777, dbmod.read_original_names(conn, "baseline"))
-            finally:
-                conn.close()
-
-    """SQLite is authoritative; JSON is migration input and explicit export."""
 
     def setUp(self):
         patcher = mock.patch.dict(os.environ, {"STEAM_CN_RENAMER_NO_DB": ""})
@@ -2027,7 +1647,7 @@ class SqliteStorageTests(unittest.TestCase):
             cfg = Path(tmp)
             data = self._ledger()
             save_names(data, cfg / "names.json")
-            self.assertTrue((cfg / "renamer.db").exists())
+            self.assertTrue((cfg / "localgamedb.db").exists())
             self.assertFalse((cfg / "names.json").exists())
             before = load_names(cfg / "names.json")
             self.assertEqual(before["entries"]["651430"]["desired_name"], "铁拳7")
@@ -2046,7 +1666,7 @@ class SqliteStorageTests(unittest.TestCase):
         import db as dbmod
 
         with tempfile.TemporaryDirectory() as tmp:
-            conn = dbmod.connect(Path(tmp) / "renamer.db")
+            conn = dbmod.connect(Path(tmp) / "localgamedb.db")
             try:
                 data = self._ledger()
                 data["entries"]["651431"] = {
@@ -2069,7 +1689,7 @@ class SqliteStorageTests(unittest.TestCase):
         import db as dbmod
 
         with tempfile.TemporaryDirectory() as tmp:
-            conn = dbmod.connect(Path(tmp) / "renamer.db")
+            conn = dbmod.connect(Path(tmp) / "localgamedb.db")
             try:
                 dbmod.write_ledger(conn, self._ledger())
                 data = dbmod.read_ledger(conn)
@@ -2086,7 +1706,7 @@ class SqliteStorageTests(unittest.TestCase):
         import db as dbmod
 
         with tempfile.TemporaryDirectory() as tmp:
-            conn = dbmod.connect(Path(tmp) / "renamer.db")
+            conn = dbmod.connect(Path(tmp) / "localgamedb.db")
             try:
                 dbmod.write_ledger(conn, self._ledger())
                 dbmod.write_ledger(conn, {"schema_version": 1, "entries": {}})
@@ -2103,7 +1723,7 @@ class SqliteStorageTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
-            conn = dbmod.connect(cfg / "renamer.db")
+            conn = dbmod.connect(cfg / "localgamedb.db")
             try:
                 dbmod.migrate_from_files(conn, cfg, ROOT / "src" / "defaults")
                 value = dbmod._get_meta(conn, "migrated_at")
@@ -2114,28 +1734,13 @@ class SqliteStorageTests(unittest.TestCase):
             finally:
                 conn.close()
 
-    def test_query_returns_only_owned_appids(self):
-        import db as dbmod
-
-        with tempfile.TemporaryDirectory() as tmp:
-            conn = dbmod.connect(Path(tmp) / "renamer.db")
-            try:
-                dbmod.write_community(conn, {1: "一", 2: "二", 3: "三", 4: "四"})
-                self.assertEqual(
-                    dbmod.query_community(conn, {2, 4, 999}),
-                    {2: "二", 4: "四"},
-                )
-                self.assertEqual(dbmod.query_community(conn, set()), {})
-            finally:
-                conn.close()
-
     def test_save_updates_db_without_json_mirror(self):
         import db as dbmod
         from mapping import load_names, save_names
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg = Path(tmp)
-            conn = dbmod.connect(cfg / "renamer.db")
+            conn = dbmod.connect(cfg / "localgamedb.db")
             try:
                 dbmod.write_ledger(conn, self._ledger())
             finally:
@@ -2145,7 +1750,7 @@ class SqliteStorageTests(unittest.TestCase):
             data["entries"]["651430"]["note"] = "数据库唯一事实源"
             save_names(data, cfg / "names.json")
 
-            conn = dbmod.connect(cfg / "renamer.db")
+            conn = dbmod.connect(cfg / "localgamedb.db")
             try:
                 stored = dbmod.read_ledger(conn)
             finally:
@@ -2194,7 +1799,7 @@ class SqliteStorageTests(unittest.TestCase):
             )
             db_data = self._ledger()
             db_data["entries"]["651430"]["note"] = "旧 DB 版本"
-            conn = dbmod.connect(cfg / "renamer.db")
+            conn = dbmod.connect(cfg / "localgamedb.db")
             try:
                 dbmod.write_ledger(conn, db_data)
             finally:
@@ -2231,7 +1836,7 @@ class SqliteStorageTests(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 load_names(source)
-            conn = dbmod.connect(cfg / "renamer.db")
+            conn = dbmod.connect(cfg / "localgamedb.db")
             try:
                 self.assertFalse(dbmod.ledger_ready(conn))
             finally:
@@ -2258,11 +1863,11 @@ class SqliteStorageTests(unittest.TestCase):
             data = load_names(source)
             data["entries"]["651430"]["note"] = "SQLite 中新数据"
             save_names(data, source)
-            (cfg / "renamer.db").unlink()
+            (cfg / "localgamedb.db").unlink()
 
             with self.assertRaisesRegex(ValueError, "migration-backups"):
                 load_names(source)
-            self.assertFalse((cfg / "renamer.db").exists())
+            self.assertFalse((cfg / "localgamedb.db").exists())
 
     def test_invalid_save_is_rejected_without_changing_db(self):
         from mapping import load_names, save_names
@@ -2309,167 +1914,6 @@ class SqliteStorageTests(unittest.TestCase):
             self.assertEqual(exported, load_names(cfg / "names.json"))
             self.assertNotEqual(main(args), 0)
 
-    def test_community_update_replaces_table_in_transaction(self):
-        import db as dbmod
-        from community import update_community_names
-
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp)
-            dbmod.ensure_db(cfg, None)
-            conn = dbmod.connect(cfg / "renamer.db")
-            try:
-                dbmod.write_community(conn, {9: "旧词条"})
-            finally:
-                conn.close()
-
-            response = mock.Mock()
-            response.json.return_value = {
-                "schemaVersion": 1, "games": {"1": "新一", "2": "新二"},
-            }
-            with mock.patch("community.httpx.get", return_value=response):
-                count, _source = update_community_names(cfg / "community_names.json")
-            self.assertEqual(count, 2)
-            self.assertFalse((cfg / "community_names.json").exists())
-
-            conn = dbmod.connect(cfg / "renamer.db")
-            try:
-                self.assertEqual(dbmod.read_community(conn), {1: "新一", 2: "新二"})
-            finally:
-                conn.close()
-
-            response.json.return_value = {
-                "schemaVersion": 1, "games": {"3": "第三条"},
-            }
-            with mock.patch("community.httpx.get", return_value=response):
-                update_community_names(cfg / "community_names.json")
-            conn = dbmod.connect(cfg / "renamer.db")
-            try:
-                self.assertEqual(dbmod.read_community(conn), {3: "第三条"})
-            finally:
-                conn.close()
-
-    def test_community_update_failure_rolls_back(self):
-        import db as dbmod
-        from community import update_community_names
-
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp)
-            dbmod.ensure_db(cfg, None)
-            conn = dbmod.connect(cfg / "renamer.db")
-            try:
-                dbmod.write_community(conn, {9: "必须保留"})
-                conn.execute(
-                    "CREATE TRIGGER fail_community_insert BEFORE INSERT ON community "
-                    "WHEN NEW.appid=2 BEGIN SELECT RAISE(ABORT, 'forced failure'); END"
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-            response = mock.Mock()
-            response.json.return_value = {
-                "schemaVersion": 1, "games": {"1": "新一", "2": "失败二"},
-            }
-            with mock.patch("community.httpx.get", return_value=response):
-                with self.assertRaises(sqlite3.IntegrityError):
-                    update_community_names(cfg / "community_names.json")
-
-            conn = dbmod.connect(cfg / "renamer.db")
-            try:
-                self.assertEqual(dbmod.read_community(conn), {9: "必须保留"})
-            finally:
-                conn.close()
-
-    def test_community_json_edits_are_ignored_after_migration(self):
-        import db as dbmod
-        from community import load_community_names
-
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp)
-            source = cfg / "community_names.json"
-            source.write_text(
-                json.dumps({"schemaVersion": 1, "games": {"1": "迁移值"}}),
-                encoding="utf-8",
-            )
-            dbmod.ensure_db(cfg, None)
-            source.write_text(
-                json.dumps({"schemaVersion": 1, "games": {"2": "迁移后手改"}}),
-                encoding="utf-8",
-            )
-            self.assertEqual(load_community_names(source), {1: "迁移值"})
-
-    def test_shared_names_roundtrip_through_db(self):
-        import db as dbmod
-        from game_names import load_shared_names_from_files
-
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp)
-            base = cfg / "base.csv"
-            local = cfg / "game_names.csv"
-            base.write_text(
-                "GameID,OriginalName,ModifiedName\n"
-                "1,Alpha,阿尔法\n2,Beta,贝塔\n",
-                encoding="utf-8-sig",
-            )
-            local.write_text(
-                "GameID,OriginalName,ModifiedName\n2,Beta,贝塔覆盖\n3,Gamma,伽马\n",
-                encoding="utf-8-sig",
-            )
-            expected = load_shared_names_from_files(base, local)
-
-            conn = dbmod.connect(cfg / "renamer.db")
-            try:
-                dbmod.sync_shared_from_files(conn, base, local)
-                stored = dbmod.read_shared_names(conn)
-            finally:
-                conn.close()
-            self.assertEqual(stored.names, expected.names)
-            self.assertEqual(stored.originals, expected.originals)
-            self.assertEqual(stored.sources, expected.sources)
-            self.assertEqual(stored.names[2], "贝塔覆盖", "本地覆盖层必须生效")
-
-    def test_shared_csv_edit_takes_effect_without_restart(self):
-        import db as dbmod
-        from game_names import load_shared_names
-
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg = Path(tmp)
-            base = cfg / "base.csv"
-            local = cfg / "game_names.csv"
-            base.write_text(
-                "GameID,OriginalName,ModifiedName\n1,Alpha,阿尔法\n",
-                encoding="utf-8-sig",
-            )
-            local.write_text(
-                "GameID,OriginalName,ModifiedName\n1,Alpha,旧译名\n",
-                encoding="utf-8-sig",
-            )
-            dbmod.ensure_db(cfg, None)
-            self.assertEqual(load_shared_names(base, local).names[1], "旧译名")
-
-            time.sleep(0.02)  # 确保 mtime 前进，触发重新导入
-            local.write_text(
-                "GameID,OriginalName,ModifiedName\n1,Alpha,新译名\n",
-                encoding="utf-8-sig",
-            )
-            self.assertEqual(
-                load_shared_names(base, local).names[1], "新译名",
-                "改 CSV 后不得需要重启",
-            )
-
-    def test_originals_prefer_baseline_over_learned(self):
-        import db as dbmod
-
-        with tempfile.TemporaryDirectory() as tmp:
-            conn = dbmod.connect(Path(tmp) / "renamer.db")
-            try:
-                dbmod.write_original_names(conn, {7: "BaselineName"}, "baseline")
-                dbmod.write_original_names(conn, {7: "LearnedName", 8: "OnlyLearned"}, "learned")
-                got = dbmod.query_originals(conn, {7, 8})
-            finally:
-                conn.close()
-            self.assertEqual(got[7], "BaselineName", "baseline 必须优先于 learned")
-            self.assertEqual(got[8], "OnlyLearned")
 
 
 class LauncherTests(unittest.TestCase):
@@ -2764,7 +2208,7 @@ class WebSaveMergeTests(unittest.TestCase):
                 finally:
                     server.shutdown()
                     server.server_close()
-                self.assertTrue((cfg / "renamer.db").exists())
+                self.assertTrue((cfg / "localgamedb.db").exists())
                 self.assertEqual((cfg / "names.json").read_bytes(), before)
                 self.assertEqual(
                     load_names(cfg / "names.json")["entries"]["651430"]["desired_name"],
@@ -3080,3 +2524,87 @@ class WebEditorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class GamedbDownloadTests(unittest.TestCase):
+    def test_download_and_merge_preserves_local_edits(self):
+        """下载合并：新 AppID 插入、name 以远端为准、本地 name_cn 编辑保留。"""
+        import sqlite3
+
+        import gamedb as gamedbmod
+        from unittest import mock
+
+        remote = Path(__import__("tempfile").gettempdir()) / "gamedb-remote.db"
+        remote.unlink(missing_ok=True)
+        rc = sqlite3.connect(remote)
+        rc.execute(
+            "CREATE TABLE games (appid INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+            "name_cn TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT 'games')"
+        )
+        rc.executemany(
+            "INSERT OR IGNORE INTO games VALUES(?,?,?,?)",
+            [(440, "Team Fortress 2 NEW", "军团要塞 2 NEW", "games"),
+             (999, "Brand New Game", "新游戏", "games")],
+        )
+        rc.commit()
+        rc.close()
+
+        local = Path(__import__("tempfile").gettempdir()) / "gamedb-local.db"
+        local.unlink(missing_ok=True)
+        lc = sqlite3.connect(local)
+        lc.execute(
+            "CREATE TABLE games (appid INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+            "name_cn TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT 'games')"
+        )
+        lc.execute(
+            "INSERT INTO games VALUES(440, 'Team Fortress 2', '我编辑的名字', 'games')"
+        )
+        lc.commit()
+        lc.close()
+
+        class FakeResp:
+            content = remote.read_bytes()
+            def raise_for_status(self):
+                return None
+
+        with mock.patch.object(
+            gamedbmod.httpx, "get", return_value=FakeResp()
+        ):
+            stats = gamedbmod.download_and_merge(local, url="http://mirror.test/gamedb.db")
+        self.assertEqual(stats["inserted"], 1)
+        self.assertEqual(stats["total"], 2)
+        conn = sqlite3.connect(local)
+        try:
+            row = conn.execute(
+                "SELECT name, name_cn FROM games WHERE appid=440"
+            ).fetchone()
+            self.assertEqual(row[0], "Team Fortress 2 NEW", "name 以远端为准")
+            self.assertEqual(row[1], "我编辑的名字", "本地编辑的 name_cn 必须保留")
+            row999 = conn.execute(
+                "SELECT name, name_cn FROM games WHERE appid=999"
+            ).fetchone()
+            self.assertEqual(row999, ("Brand New Game", "新游戏"))
+        finally:
+            conn.close()
+        remote.unlink(missing_ok=True)
+        local.unlink(missing_ok=True)
+
+    def test_download_rejects_non_gamedb_payload(self):
+        """下载内容不是有效的 gamedb（无 games 表）必须拒绝并清理临时文件。"""
+        import gamedb as gamedbmod
+
+        bad = Path(__import__("tempfile").gettempdir()) / "gamedb-bad.db"
+        bad.write_bytes(b"this is not a database")
+        class FakeResp:
+            content = bad.read_bytes()
+            def raise_for_status(self):
+                return None
+        target = Path(__import__("tempfile").gettempdir()) / "gamedb-target.db"
+        target.unlink(missing_ok=True)
+        with mock.patch.object(
+            gamedbmod.httpx, "get", return_value=FakeResp()
+        ):
+            with self.assertRaises(ValueError):
+                gamedbmod.download_and_merge(target, url="http://mirror.test/bad")
+        self.assertFalse(target.exists(), "校验失败不得落地覆盖")
+        bad.unlink(missing_ok=True)

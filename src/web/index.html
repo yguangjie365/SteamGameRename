@@ -617,7 +617,7 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
       <button class="act" type="button" id="syncBtn" onclick="doSync()" aria-label="静默同步" title="只补回 Steam 更新后丢失的已批准名称">
         <svg class="i"><use href="#i-sync"/></svg><span>静默同步</span>
       </button>
-      <button class="act" type="button" onclick="openTasks()" aria-label="更新词库" title="联网更新社区词库">
+      <button class="act" type="button" onclick="openTasks()" aria-label="更新游戏库" title="从 GitHub 更新游戏信息库 gamedb.db">
         <svg class="i"><use href="#i-cloud"/></svg><span>词库</span>
       </button>
       <button class="act" type="button" id="themeBtn" onclick="toggleTheme()" aria-label="切换浅色 / 深色主题" title="切换浅色 / 深色主题">
@@ -774,12 +774,12 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
 <!-- 联网词库 -->
 <div class="mask" id="taskMask" role="dialog" aria-modal="true" aria-labelledby="taskTitle">
   <div class="sheet">
-    <p class="eyebrow">Online Dictionaries</p>
-    <h2 id="taskTitle">联网更新词库</h2>
-    <p class="hint">结果写入本地缓存，不影响已批准的名称，也不写入 Steam 分片。</p>
+    <p class="eyebrow">Game Database</p>
+    <h2 id="taskTitle">更新游戏信息库</h2>
+    <p class="hint">从 GitHub 下载 gamedb.db 并合并：新 AppID 与英文名以远端为准，你手工编辑的中文名（name_cn）不会被覆盖。不影响已批准的名称，也不写入 Steam 分片。</p>
     <div class="task-row">
-      <div><b>社区词库</b><span>GitHub · 覆盖 AppID 译名</span></div>
-      <button class="btn" type="button" id="updCommunityBtn" onclick="startTask('/api/update-community')">更新</button>
+      <div><b>游戏信息库</b><span>gamedb.db · AppID / 英文名 / 中文名</span></div>
+      <button class="btn" type="button" id="updCommunityBtn" onclick="startTask('/api/update-gamedb')">更新</button>
     </div>
     <div class="track" id="taskTrack" hidden><i id="taskBar"></i></div>
     <p class="hint" id="taskProgress" aria-live="polite">空闲</p>

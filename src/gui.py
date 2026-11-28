@@ -21,14 +21,13 @@ from backup import (
     steam_shutdown,
     steam_start,
 )
-from community import update_community_names
+from gamedb import GAMEDB_DOWNLOAD_URL, download_and_merge, gamedb_path
 from paths import DEFAULT_BACKUPS, DEFAULT_CONFIG, asset_dir, ensure_config
 from version import __version__
 from mapping import (
     TARGET_HINT,
     approved_changes,
     is_allowed_target,
-    learn_original_names,
     load_names,
     pending_changes,
     plan_from_config,
@@ -48,10 +47,9 @@ def _source_signature(appinfo: Path, config_dir: Path) -> tuple:
     paths = sorted(appinfo.glob("appinfo_*.vdf"))
     paths += [
         config_dir / name
-        for name in ("names.json",
-                     "community_names.json", "community_names.csv",
-                     "game_names.csv", "renamer.db", "renamer.db-wal",
-                     "renamer.db-shm")
+        for name in ("names.json", "gamedb.db",
+                     "localgamedb.db", "localgamedb.db-wal",
+                     "localgamedb.db-shm")
     ]
     paths += [
         asset_dir("defaults") / "game_names.csv",
@@ -336,27 +334,29 @@ def make_handler(
                 self._json(200, {"message": f"已保存 {len(entries)} 条"})
                 return
 
-            if path == "/api/update-community":
+            if path == "/api/update-gamedb":
                 def _update_worker() -> None:
                     with task_lock:
-                        task_state["message"] = "正在下载社区词库…"
-                    count, source = update_community_names(
-                        config_dir / "community_names.json"
+                        task_state["message"] = "正在下载游戏信息库 gamedb.db…"
+                    stats = download_and_merge(
+                        gamedb_path(config_dir), GAMEDB_DOWNLOAD_URL
                     )
-                    via = "直连" if source.startswith(
-                        "https://raw.githubusercontent.com") else "国内镜像"
                     with task_lock:
                         task_state.update(
-                            message=f"完成，共 {count} 条（经{via}）", done=count,
+                            message=(
+                                f"完成：新增 {stats['inserted']} 条，"
+                                f"库内共 {stats['total']:,} 条"
+                            ),
+                            done=stats["total"],
                         )
-                    # 词库缓存已变化，让 /api/plan 的签名失效
+                    # 词库已变化，让 /api/plan 的签名失效
                     with _plan_lock:
                         _plan_cache.clear()
 
-                if not _start_task("update-community", _update_worker):
+                if not _start_task("update-gamedb", _update_worker):
                     self._json(409, {"error": "已有联网任务在运行"})
                     return
-                self._json(202, {"message": "已开始更新社区词库"})
+                self._json(202, {"message": "已开始更新游戏信息库"})
                 return
 
             if path == "/api/sync":
@@ -570,13 +570,6 @@ def run_gui(steam_dir: str = r"D:\Steam", config_dir: Path = DEFAULT_CONFIG,
     config_path = Path(config_dir)
     appinfo_path = Path(steam_dir) / "APPCache" / "APPInfo"
 
-    def _background_learn() -> None:
-        try:
-            learn_original_names(appinfo_path, config_path)
-        except Exception:
-            pass  # 学习是纯展示增强，失败绝不影响主流程
-
-    threading.Thread(target=_background_learn, daemon=True).start()
     # write_lock 由启动器传入并与 SteamGuard 共享：浏览器模式下 Web 的
     # 「应用写入」与退出边沿的静默补写必须互斥（审查报告 M-1）
     handler = make_handler(steam_dir, config_path, Path(backup_root),

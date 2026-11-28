@@ -29,16 +29,15 @@ license-files = ["LICENSE"]
 py-modules = [
   "backup",
   "cli",
-  "community",
   "db",
   "game_names",
+  "gamedb",
   "gui",
   "mapping",
   "paths",
   "pinyin",
   "shard",
   "steam_locator",
-  "store",
   "vdf",
   "version",
 ]

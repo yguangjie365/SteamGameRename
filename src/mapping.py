@@ -11,22 +11,11 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ValidationError
 
 import db as dbmod
+import gamedb as gamedbmod
 from backup import atomic_write
-from community import (  # noqa: F401  (re-exported for CLI/GUI/tests)
-    COMMUNITY_NAMES_URL,
-    _read_community_csv,
-    load_community_names,
-    update_community_names,
-)
-# 商店中文名补全（store.py / store_cache）已于 v1.0.1 移除：Steam appdetails
-# API 拒绝批量请求、name 字段不携带本地化名，且建议名来源收敛后该数据
-# 无任何消费方（见开发者说明 §30）。
-from game_names import (
-    LEARNED_CSV_NAME, ORIGINAL_CSV_NAME, SharedNames, load_original_names,
-    load_shared_names, merge_original_names, names_match,
-    write_learned_originals,
-)
-from paths import asset_dir
+# v1.0.1 架构调整：建议名（gamedb.name_cn）与原名对照（gamedb.name）的
+# 来源切换为 gamedb.db；community.py（renamer.db 社区表 + JSON 下载）与
+# game_names 的共享 CSV/学习沉淀机制随之废弃（开发者说明 §32）。
 from pinyin import sortas_for
 from shard import AppEntry, Shard, ShardError, app_names, parse_file, target_path
 from vdf import CJK, find_string, get_node, node_text, resolve, spacing_warning
@@ -370,7 +359,6 @@ def _plan_entry(
     include_unchanged: bool,
     community_names: dict[int, str] | None,
     store_cache: dict[int, str] | None,
-    shared_names: dict[int, str] | None = None,
     original_names: dict[int, str] | None = None,
 ) -> PlanEntry | None:
     """Plan one app record from its suggestion and optional custom name."""
@@ -406,7 +394,7 @@ def _plan_entry(
     base, source = resolve_base(
         original, localized, priority,
         community_names=community_names, store_cache=store_cache,
-        appid=entry.appid, shared_names=shared_names,
+        appid=entry.appid,
     )
     if base and not CJK.search(base):
         # 社区词库偶有非中文条目时不作为中文建议名展示
@@ -485,7 +473,6 @@ def build_plan(
     include_no_zh: bool = True,
     store_cache: dict[int, str] | None = None,
     community_names: dict[int, str] | None = None,
-    shared: SharedNames | None = None,
     original_names: dict[int, str] | None = None,
     shard_names: set[str] | frozenset[str] | None = None,
     pairs: list[tuple[Shard, AppEntry]] | None = None,
@@ -506,7 +493,6 @@ def build_plan(
             defaults=defaults, priority=priority,
             include_no_zh=include_no_zh, include_unchanged=include_unchanged,
             community_names=community_names, store_cache=store_cache,
-            shared_names=shared.names if shared else None,
             original_names=original_names,
         )
         if item is not None:
@@ -526,28 +512,6 @@ def build_plan(
         warning = spacing_warning(item.desired_name)
         item.warnings = [warning] if warning else []
 
-    if shared:
-        # 词库自身的格式问题挂到第一条命中该来源的行，避免静默失败
-        for item in plan:
-            if item.source == "shared_csv":
-                item.warnings.extend(f"共享词库：{w}" for w in shared.warnings[:5])
-                break
-        # 原名不符通常意味着 AppID 填错——宁可提示，也不能悄悄改错游戏
-        by_id = {item.appid: item for item in plan}
-        for appid, recorded in shared.originals.items():
-            item = by_id.get(appid)
-            if item is None or item.source != "shared_csv":
-                continue
-            current = item.original_name or ""
-            target = shared.names.get(appid, "")
-            if (
-                recorded.strip() and current
-                and not names_match(recorded, current)
-                and not (target and names_match(target, current))
-            ):
-                item.warnings.append(
-                    f"共享词库记的原名是「{recorded}」，Steam 当前是「{item.original_name}」，请核对 AppID"
-                )
     return plan
 
 
@@ -567,139 +531,28 @@ def plan_from_config(
     folder = Path(config_dir)
     db_file = dbmod.db_path(folder)
 
-    # SQLite 路径：只查本机拥有的 appid。这是 SQLite 唯一比全量加载更快的地方
-    # ——10 万条词库全量加载要 50-70ms，按主键 IN 查 803 条只要 ~1ms。
-    if db_file.exists():
-        pairs = scan_shards(appinfo_dir, shard_names=shard_names)
-        appids = {entry.appid for _, entry in pairs}
-        if appids:
-            baseline_shared = asset_dir("defaults") / "game_names.csv"
-            local_shared = folder / "game_names.csv"
-            conn = dbmod.connect(db_file)
-            try:
-                community = dbmod.query_community(conn, appids)
-                originals = dbmod.query_originals(conn, appids)
-                # 共享词库复用同一个连接：少一次 connect + 一次 CSV 指纹检查
-                dbmod.sync_shared_from_files(conn, baseline_shared, local_shared)
-                shared = dbmod.read_shared_names(conn)
-                shared.warnings = dbmod.read_shared_warnings(conn)
-            finally:
-                conn.close()
-            if not (shared.names or shared.originals):
-                # 库里的共享词库为空（未迁移）→ 回退 CSV 解析
-                shared = load_shared_names(baseline_shared, local_shared)
-            # 用户手工放的 CSV 覆盖层仍然优先（与 load_community_names 一致）
-            overlay = folder / "community_names.csv"
-            if overlay.exists():
-                try:
-                    community.update(
-                        {
-                            appid: name
-                            for appid, name in _read_community_csv(overlay).items()
-                            if appid in appids
-                        }
-                    )
-                except (OSError, ValueError):
-                    pass
-            if community or originals:
-                return build_plan(
-                    appinfo_dir,
-                    load_names(folder / "names.json"),
-                    include_unchanged=include_unchanged,
-                    include_no_zh=include_no_zh,
-                    shard_names=shard_names,
-                    community_names=community,
-                    shared=shared,
-                    original_names=originals,
-                    pairs=pairs,  # 复用已扫描结果，避免第二次遍历 247 个分片
-                )
-        # 表为空（未迁移/全新库）→ 落到下面的文件路径
-
-    return build_plan(
-        appinfo_dir,
-        load_names(folder / "names.json"),
-        include_unchanged=include_unchanged,
-        include_no_zh=include_no_zh,
-        shard_names=shard_names,
-        community_names=load_community_names(folder / "community_names.json"),
-        shared=load_shared_names(
-            asset_dir("defaults") / "game_names.csv",
-            folder / "game_names.csv",
-        ),
-        original_names=merge_original_names(
-            load_original_names(asset_dir("defaults") / ORIGINAL_CSV_NAME),
-            load_original_names(folder / LEARNED_CSV_NAME),
-        ),
-    )
-
-
-def learn_original_names(
-    appinfo_dir: str | Path, config_dir: str | Path
-) -> tuple[int, int]:
-    """Capture English names seen in shards into the local CSV layer.
-
-    Only non-Chinese common.name values are learned, and only for AppIDs not
-    already covered by the bundled baseline. AppIDs the user has approved or
-    overridden are skipped: their shard name may be a chosen alias ("CS2"),
-    which must never be recorded as the original Steam name. Pure display aid:
-    it never feeds into target resolution or the write path. Returns (new, total).
-    """
-    folder = Path(config_dir)
-    local_path = folder / LEARNED_CSV_NAME
-    db_file = dbmod.db_path(folder)
-    baseline: dict[int, str] = {}
-    local: dict[int, str] = {}
-
-    # SQLite 优先：db 存在时 baseline/learned 都在库里，读 CSV 会与库脱节
-    if db_file.exists():
-        conn = dbmod.connect(db_file)
+    # gamedb.db 是建议名（name_cn）与原名对照（name）的唯一来源；
+    # 按本机拥有的 appid 查询（SQLite 主键 IN，803 条约 1ms）。
+    pairs = scan_shards(appinfo_dir, shard_names=shard_names)
+    appids = {entry.appid for _, entry in pairs}
+    if appids:
+        gconn = gamedbmod.connect(gamedbmod.gamedb_path(folder))
         try:
-            baseline = dbmod.read_original_names(conn, "baseline")
-            local = dbmod.read_original_names(conn, "learned")
+            community = gamedbmod.query_name_cn(gconn, appids)
+            originals = gamedbmod.query_names(gconn, appids)
         finally:
-            conn.close()
-    if not baseline:
-        baseline = load_original_names(asset_dir("defaults") / ORIGINAL_CSV_NAME)
-    if not local:
-        local = load_original_names(local_path)
-    learned = dict(local)
-
-    # Skip entries the user has touched. Approved/overridden names are user
-    # intent, not pristine Steam data — learning them would poison the display
-    # layer with aliases. A missing or broken ledger must not block learning.
-    modified: set[int] = set()
-    try:
-        ledger = load_names(folder / "names.json")
-        for key, record in (ledger.get("entries") or {}).items():
-            if not str(key).isdigit():
-                continue
-            if (
-                record.get("approved")
-                or record.get("manual_override")
-                or (record.get("desired_name") or "").strip()
-            ):
-                modified.add(int(key))
-    except (OSError, ValueError):
-        pass
-
-    for shard, entry in scan_shards(appinfo_dir):
-        name, _ = app_names(shard, entry)
-        appid = entry.appid
-        if appid in learned or appid in baseline or appid in modified or not name:
-            continue
-        if CJK.search(name):
-            continue
-        learned[appid] = name.strip()
-    new = len(learned) - len(local)
-    if new:
-        write_learned_originals(learned, local_path)  # CSV 交换格式
-        if db_file.exists():
-            conn = dbmod.connect(db_file)
-            try:
-                dbmod.write_original_names(conn, learned, "learned")
-            finally:
-                conn.close()
-    return new, len(learned)
+            gconn.close()
+        return build_plan(
+            appinfo_dir,
+            load_names(folder / "names.json"),
+            include_unchanged=include_unchanged,
+            include_no_zh=include_no_zh,
+            shard_names=shard_names,
+            community_names=community,
+            original_names=originals,
+            pairs=pairs,  # 复用已扫描结果，避免第二次遍历 247 个分片
+        )
+    return []
 
 
 def pending_changes(plan: list[PlanEntry]) -> dict[str, dict[int, dict[str, str]]]:
