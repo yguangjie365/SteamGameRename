@@ -7,6 +7,8 @@
 *.db
 *.db-wal
 *.db-shm
+# 随程序分发的游戏信息库模板（公共数据，非用户台账）
+!src/defaults/gamedb.db
 # 测试运行时迁移逻辑在 fixture config 里留下的备份产物
 tests/fixtures/config/migration-backups/
 *.bak
