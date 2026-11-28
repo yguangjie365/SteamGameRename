@@ -605,6 +605,7 @@ class RobustnessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder = ensure_config(tmp)
             self.assertTrue((folder / "names.json").exists())
+            self.assertTrue((folder / "gamedb.db").exists(), "gamedb.db 随程序分发")
             self.assertFalse((folder / "rules.json").exists())
             self.assertEqual(json.loads((folder / "names.json").read_text(encoding="utf-8"))["schema_version"], 1)
 

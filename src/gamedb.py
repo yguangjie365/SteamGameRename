@@ -18,7 +18,7 @@ GAMEDB_FILENAME = "gamedb.db"
 # 维护者把 gamedb.db 放在主仓库分发；可用环境变量覆盖。
 GAMEDB_DOWNLOAD_URL = os.environ.get(
     "STEAM_CN_GAMEDB_URL",
-    "https://raw.githubusercontent.com/yguangjie365/SteamGameRename/main/gamedb.db",
+    "https://raw.githubusercontent.com/yguangjie365/SteamGameRename/main/src/defaults/gamedb.db",
 )
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (

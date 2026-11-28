@@ -49,10 +49,10 @@ def ensure_config(config_dir: str | Path) -> Path:
     folder = Path(config_dir)
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        for name in ("names.json",):
+        for name in ("names.json", "gamedb.db"):
             target = folder / name
             if target.exists():
-                continue
+                continue  # 用户数据/编辑不覆盖；更新走「词库更新」下载合并
             template = DEFAULTS_DIR / name
             if template.exists():
                 shutil.copyfile(template, target)
