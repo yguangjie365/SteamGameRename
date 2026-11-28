@@ -2889,6 +2889,9 @@ class WebEditorTests(unittest.TestCase):
         self.assertIn("Steam 游戏《Caribbean Crashers》", with_appid)
         self.assertIn("（AppID 347100）", with_appid)
         self.assertIn("中文名称是什么", with_appid)
+        # 防编造：必须明确要求 AI 在无官方中文名时如实回答、不得自行翻译
+        self.assertIn("不要自行翻译", with_appid)
+        self.assertIn("无官方中文名", with_appid)
         self.assertNotIn("AppID", without)
         self.assertIn("Fallback Name", without)
 
