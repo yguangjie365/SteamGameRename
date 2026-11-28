@@ -159,10 +159,17 @@ def create_backup(appinfo_dir: str | Path, backup_root: str | Path) -> Path:
     }
     for file in files:
         target = destination / file.name
-        target.write_bytes(file.read_bytes())
-        manifest["files"][file.name] = sha256_file(target)
-    (destination / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        data = file.read_bytes()
+        # 备份的使命就是在主文件出事时可用：写入句柄上 fsync，避免断电
+        # 留下与清单不符的半截副本（§18.2 遗留的父目录 fsync 顺手项）。
+        with target.open("wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        manifest["files"][file.name] = hashlib.sha256(data).hexdigest()
+    atomic_write(
+        destination / "manifest.json",
+        (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
     )
     return destination
 

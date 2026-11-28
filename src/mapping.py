@@ -39,14 +39,11 @@ TYPE_LABELS = {
     "other": "其他",
 }
 
-KNOWN_PRIORITIES = {
-    "user_override", "local_schinese", "local_sc_schinese",
-    "common_name", "shared_csv", "community", "store_api",
-}
-# 历史配置里可能仍保留以上来源；当前版本起建议名固定只取社区词库，
-# 该集合仅为兼容旧配置的读取，不再决定建议名来源。唯一仍会出现在计划
-# 输出里的旧来源是 common_name：原名即中文的条目用它标记 unchanged
-# 状态（见 _plan_entry），不代表它参与建议名合成。
+# 旧配置里的 defaults.mapping_priority 可能保留 user_override / local_schinese /
+# common_name / shared_csv / store_api 等历史来源名；当前版本起建议名固定只取
+# 社区词库，这些名字不再决定建议名来源。唯一仍会出现在计划输出里的旧来源是
+# common_name：原名即中文的条目用它标记 unchanged 状态（见 _plan_entry），
+# 不代表它参与建议名合成。
 
 # 只有名称字段允许写入；写进 common.icon 之类会静默破坏 appinfo 元数据
 _LANG_SUFFIX = re.compile(r"[a-z_]{2,20}")

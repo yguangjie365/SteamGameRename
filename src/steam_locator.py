@@ -12,6 +12,8 @@ import json
 import os
 from pathlib import Path
 
+from backup import atomic_write
+
 ROOT = Path(__file__).resolve().parent
 # 本模块位于 src/，但 launcher.json 属于项目根（与 run.py 同层）
 PROJECT_ROOT = ROOT.parent
@@ -40,8 +42,9 @@ def load_settings() -> dict:
 
 def save_settings(data: dict) -> None:
     try:
-        SETTINGS_FILE.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        atomic_write(
+            SETTINGS_FILE,
+            (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
         )
     except OSError:
         pass

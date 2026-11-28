@@ -564,7 +564,8 @@ def make_handler(
 
 def run_gui(steam_dir: str = r"D:\Steam", config_dir: Path = DEFAULT_CONFIG,
             port: int = 8765, open_browser: bool = True,
-            backup_root: Path = DEFAULT_BACKUPS) -> None:
+            backup_root: Path = DEFAULT_BACKUPS,
+            write_lock: threading.Lock | None = None) -> None:
     ensure_config(config_dir)
     config_path = Path(config_dir)
     appinfo_path = Path(steam_dir) / "APPCache" / "APPInfo"
@@ -576,7 +577,10 @@ def run_gui(steam_dir: str = r"D:\Steam", config_dir: Path = DEFAULT_CONFIG,
             pass  # 学习是纯展示增强，失败绝不影响主流程
 
     threading.Thread(target=_background_learn, daemon=True).start()
-    handler = make_handler(steam_dir, config_path, Path(backup_root))
+    # write_lock 由启动器传入并与 SteamGuard 共享：浏览器模式下 Web 的
+    # 「应用写入」与退出边沿的静默补写必须互斥（审查报告 M-1）
+    handler = make_handler(steam_dir, config_path, Path(backup_root),
+                           write_lock=write_lock)
     try:
         server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     except OSError as exc:

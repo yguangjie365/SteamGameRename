@@ -45,16 +45,6 @@ PORT_TRIES = 20
 INSTANCE_LOCK_PORT = 17650  # 只 bind 不业务，跨进程单实例
 DEFAULT_GUARD_INTERVAL = 30.0
 
-COMMON_STEAM_PATHS = (
-    r"C:\Program Files (x86)\Steam",
-    r"C:\Program Files\Steam",
-    r"C:\Steam",
-    r"D:\Steam",
-    r"D:\Program Files (x86)\Steam",
-    r"E:\Steam",
-    r"F:\Steam",
-)
-
 
 class SteamGuard:
     """Watch for the Steam running→exited edge and quietly rewrite names."""
@@ -313,10 +303,13 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 52)
 
     # SteamGuard：Steam 退出后静默补回被覆盖的汉化。浏览器模式下同样需要。
+    # 写锁与 Web 端点共享一把：守护补写与「应用写入」互斥（审查报告 M-1，
+    # v0.8.0 回退浏览器模式时曾丢失该共享，导致两路写入可并发）。
     from paths import DEFAULT_BACKUPS, DEFAULT_CONFIG
 
+    write_lock = threading.Lock()
     guard = SteamGuard(
-        steam_dir, DEFAULT_CONFIG, DEFAULT_BACKUPS, threading.Lock(),
+        steam_dir, DEFAULT_CONFIG, DEFAULT_BACKUPS, write_lock,
         DEFAULT_GUARD_INTERVAL,
     )
     guard.start()
@@ -330,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         run_gui(str(steam_dir), config_dir=DEFAULT_CONFIG, backup_root=DEFAULT_BACKUPS,
-                port=port, open_browser=False)
+                port=port, open_browser=False, write_lock=write_lock)
     finally:
         guard.stop()
         if instance_lock is not None:

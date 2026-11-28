@@ -209,6 +209,20 @@ def merge_original_names(
     return merged
 
 
+def _safe_csv_cell(value: str) -> str:
+    """Neutralize spreadsheet formula injection (CWE-1236).
+
+    Steam names come from third-party publishers; a cell starting with
+    = + - @ TAB or CR would execute as a formula/DDE when the exported CSV
+    is opened in Excel. Prefixing an apostrophe matches the front-end
+    csvField() escaping so both export paths behave the same.
+    """
+    value = str(value)
+    if value and (value[0] in "=+-@" or value[0] in "\t\r"):
+        return "'" + value
+    return value
+
+
 def write_learned_originals(
     names: dict[int, str], dest: str | Path
 ) -> int:
@@ -217,7 +231,7 @@ def write_learned_originals(
     writer = csv.writer(buffer)
     writer.writerow(("GameID", "OriginalName"))
     for appid in sorted(names):
-        writer.writerow((appid, names[appid]))
+        writer.writerow((appid, _safe_csv_cell(names[appid])))
     atomic_write(Path(dest), ("\ufeff" + buffer.getvalue()).encode("utf-8"))
     return len(names)
 
@@ -231,6 +245,12 @@ def write_shared_names_csv(
     writer = csv.writer(buffer)
     writer.writerow(FIELDS)
     for appid, original, modified, source in entries:
-        writer.writerow((appid, original, modified, source, today, "true", ""))
+        writer.writerow((
+            appid,
+            _safe_csv_cell(original),
+            _safe_csv_cell(modified),
+            _safe_csv_cell(source),
+            today, "true", "",
+        ))
     atomic_write(Path(dest), ("\ufeff" + buffer.getvalue()).encode("utf-8"))
     return len(entries)

@@ -1709,6 +1709,24 @@ class LearnedOriginalsTests(unittest.TestCase):
             loaded = game_names.load_original_names(dest)
             self.assertEqual(loaded, merged)
 
+    def test_learned_csv_escapes_formula_prefix(self):
+        """M-2 回归：以 = - @ 开头的名字写入 CSV 必须转义，防 Excel 公式注入。"""
+        import game_names
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "learned.csv"
+            game_names.write_learned_originals(
+                {440: '=HYPERLINK("https://evil.example")', 1: "-Ward", 2: "@risk"},
+                dest,
+            )
+            text = dest.read_text(encoding="utf-8-sig")
+            self.assertIn("'=HYPERLINK", text)
+            self.assertIn("'-Ward", text)
+            self.assertIn("'@risk", text)
+            # 读回时撇号是字面内容的一部分——沉淀表只作展示，读取端不受影响
+            self.assertEqual(game_names.load_original_names(dest)[440],
+                             "'=HYPERLINK(\"https://evil.example\")")
+
     def test_learn_captures_non_chinese_only(self):
         import mapping
 
@@ -2464,6 +2482,26 @@ class LauncherTests(unittest.TestCase):
         with mock.patch.object(backup, "steam_running", return_value=True):
             self.assertEqual(guard.sync_once(), 0)
         self.assertIn("运行中", guard.last_result)
+
+    def test_write_lock_is_shared_with_web_layer(self):
+        """M-1 回归：启动器创建的锁必须同时交给 SteamGuard 与 run_gui。
+
+        v0.8.0 回退浏览器模式时丢掉了 §15.1 的锁共享，守护补写与
+        「应用写入」曾各自持一把锁并发写分片。
+        """
+        import inspect
+        import threading
+
+        import run as rd
+        from gui import make_handler, run_gui
+
+        lock = threading.Lock()
+        guard = rd.SteamGuard(".", ".", ".", lock)
+        self.assertIs(guard._lock, lock)
+        # run_gui 必须声明 write_lock 并透传给 make_handler
+        self.assertIn("write_lock", inspect.signature(run_gui).parameters)
+        handler = make_handler(".", Path("."), Path("."), write_lock=lock)
+        self.assertIsNotNone(handler)
 
 class WriteGuardTests(unittest.TestCase):
     """写入链路的四道新守卫：平台、原始完整性、陈旧解析树、中断回滚。"""
