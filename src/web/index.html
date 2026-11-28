@@ -827,7 +827,7 @@ let engine = (() => {
 if (!ENGINES[engine]) engine = DEFAULT_ENGINE;
 try { searchedId = sessionStorage.getItem('searchedAppid') || ''; } catch (e) { searchedId = ''; }
 
-const SEARCH_QUERY_TPL = 'Steam 游戏《{name}》{appid} 的简体中文名称是什么？请直接给出 Steam 商店页面显示的中文名，不要解释；如果 Steam 没有官方中文名，请回答"无官方中文名"，不要自行翻译。';
+const SEARCH_QUERY_TPL = 'Steam 游戏《{name}》{appid} 的简体中文名称是什么？请直接给出答案：优先给出 Steam 商店页面显示的官方中文名；若没有官方中文名，请给出 3DM、游民星空、Bilibili、中文维基百科等国内游戏网站的公认译名，并注明"社区译名"；若两者都没有才回答"无公认中文名"。不要自己生造翻译。';
 
 function esc(s){
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>

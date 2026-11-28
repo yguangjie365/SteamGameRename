@@ -2889,9 +2889,13 @@ class WebEditorTests(unittest.TestCase):
         self.assertIn("Steam 游戏《Caribbean Crashers》", with_appid)
         self.assertIn("（AppID 347100）", with_appid)
         self.assertIn("中文名称是什么", with_appid)
-        # 防编造：必须明确要求 AI 在无官方中文名时如实回答、不得自行翻译
-        self.assertIn("不要自行翻译", with_appid)
-        self.assertIn("无官方中文名", with_appid)
+        # 三级取值链：官方中文名优先 → 社区公认译名（须注明"社区译名"）→
+        # 都没有才承认没有，且不得自己生造翻译（防 AI 编造"看起来像官方"的译名）
+        self.assertIn("官方中文名", with_appid)
+        self.assertIn("3DM", with_appid)
+        self.assertIn("社区译名", with_appid)
+        self.assertIn("不要自己生造翻译", with_appid)
+        self.assertIn("无公认中文名", with_appid)
         self.assertNotIn("AppID", without)
         self.assertIn("Fallback Name", without)
 
