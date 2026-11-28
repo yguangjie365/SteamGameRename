@@ -75,7 +75,12 @@ try{
   --stage:1480px;
   --ease:cubic-bezier(.22,.61,.36,1);
   --font:"Segoe UI Variable Text","Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  /* 展示栈：Win11 的 Variable Display 为大字号优化（更紧字距、更精致笔画），
+     用于统计大数字等 ≥24px 场景；Win10 无此字体时回退 Segoe UI 静态字重 */
+  --font-display:"Segoe UI Variable Display","Segoe UI Variable Text","Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
   --mono:"Cascadia Mono",ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
+  /* 字重阶梯约定：400 正文 / 500 次强调 / 600 标题与徽章 / 700 主按钮与品牌。
+     只用这四档——微软雅黑等静态字体下 520/650 这类中间值会被不可控地舍入 */
 }
 :root[data-theme="dark"]{
   color-scheme:dark;
@@ -182,9 +187,9 @@ button,a,input,select{touch-action:manipulation}
   box-shadow:0 0 26px var(--accent-glow),inset 0 1px 0 var(--highlight-inset)}
 .brand-mark::after{content:"";position:absolute;right:-2px;bottom:-2px;width:6px;height:6px;
   border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
-.brand-word{font-size:14.5px;font-weight:650;letter-spacing:.005em;white-space:nowrap;color:var(--text)}
+.brand-word{font-size:14.5px;font-weight:700;letter-spacing:.005em;white-space:nowrap;color:var(--text)}
 .brand-word em{font-style:normal;font-weight:400;color:var(--muted)}
-.ver{padding:1px 5px;border-radius:4px;font:500 9.5px/1.6 var(--mono);color:var(--accent-2);
+.ver{padding:1px 5px;border-radius:4px;font:500 10px/1.6 var(--mono);color:var(--accent-2);
   background:var(--accent-dim);border:1px solid var(--accent-line);white-space:nowrap}
 .ver:empty{display:none}
 .live{display:inline-flex;align-items:center;gap:7px;padding:5px 10px;border-radius:999px;
@@ -198,13 +203,13 @@ button,a,input,select{touch-action:manipulation}
 .acts{display:flex;align-items:center;gap:2px}
 .act{position:relative;display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 10px;
   border:1px solid transparent;border-radius:7px;background:transparent;color:var(--muted);
-  cursor:pointer;font-size:12px;font-weight:520;white-space:nowrap;
+  cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;
   transition:color .18s var(--ease),background .18s var(--ease),border-color .18s var(--ease)}
 .act:hover{color:var(--text);background:var(--wash-1);border-color:var(--line)}
 .act:active{transform:translateY(1px)}
 .act:disabled{opacity:.4;cursor:not-allowed;transform:none}
 .act.solid{background:linear-gradient(180deg,var(--primary-1),var(--primary-2));border-color:var(--primary-border);color:var(--on-accent);
-  font-weight:650;padding:0 14px;box-shadow:0 4px 18px var(--accent-glow)}
+  font-weight:700;padding:0 14px;box-shadow:0 4px 18px var(--accent-glow)}
 .act.solid:hover{background:linear-gradient(180deg,var(--primary-1-hover),var(--primary-2-hover));border-color:var(--primary-border-hover);color:var(--on-accent)}
 .act.quiet{color:var(--faint)}
 .act.quiet:hover{color:var(--red);border-color:var(--red-line);background:var(--red-wash)}
@@ -225,9 +230,9 @@ button,a,input,select{touch-action:manipulation}
 .metric + .metric{border-left:1px solid var(--line)}
 .metric:hover{background:var(--wash-1)}
 .metric .k{font-size:10.5px;color:var(--muted);letter-spacing:.06em;white-space:nowrap}
-.metric .v{font-size:clamp(25px,2.4vw,35px);line-height:1;font-weight:600;letter-spacing:-.03em;
+.metric .v{font-family:var(--font-display);font-size:clamp(25px,2.4vw,35px);line-height:1;font-weight:600;letter-spacing:-.03em;
   font-variant-numeric:tabular-nums;color:var(--tone,var(--text));transition:color .2s}
-.metric .h{font:500 9.5px/1.4 var(--mono);letter-spacing:.08em;color:var(--faint);white-space:nowrap}
+.metric .h{font:500 10px/1.4 var(--mono);letter-spacing:.08em;color:var(--faint);white-space:nowrap}
 .metric[data-tone="green"]{--tone:var(--green-ink)}
 .metric[data-tone="blue"]{--tone:var(--accent-2)}
 .metric[data-tone="amber"]{--tone:var(--amber-ink)}
@@ -251,7 +256,7 @@ button,a,input,select{touch-action:manipulation}
   font-size:13.5px;color:var(--text)}
 .search input::placeholder{color:var(--faint)}
 .search kbd{flex:0 0 auto;padding:1px 5px;border:1px solid var(--line);border-radius:4px;
-  font:500 9.5px/1.5 var(--mono);color:var(--faint);background:var(--wash-1)}
+  font:500 10px/1.5 var(--mono);color:var(--faint);background:var(--wash-1)}
 .sel{appearance:none;-webkit-appearance:none;height:32px;padding:0 20px 0 2px;border:0;
   border-bottom:1px solid transparent;border-radius:0;background:transparent;color:var(--text-2);
   font-size:12px;cursor:pointer;outline:none;
@@ -282,7 +287,7 @@ button,a,input,select{touch-action:manipulation}
 .lastsearch{display:inline-flex;align-items:center;gap:7px;padding:4px 9px;border-radius:4px;
   border:1px solid var(--amber-line);background:var(--amber-wash);color:var(--amber-ink);
   font-size:11px;white-space:nowrap}
-.lastsearch .ls-k{font:500 9px/1.5 var(--mono);letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
+.lastsearch .ls-k{font:500 10px/1.5 var(--mono);letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
 .lastsearch b{font-family:var(--mono);font-weight:600;color:var(--amber-bright)}
 .lastsearch .ls-n{max-width:170px;overflow:hidden;text-overflow:ellipsis}
 .lastsearch .lnk{color:var(--amber-bright);border-bottom-color:var(--amber-line)}
@@ -320,7 +325,7 @@ tbody tr:last-child td{border-bottom:none}
 tbody.intro tr{animation:rise .44s var(--ease) backwards;animation-delay:calc(var(--i,0) * 14ms)}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
-.ttag{display:inline-flex;align-items:center;gap:6px;font:600 9.5px/1 var(--mono);
+.ttag{display:inline-flex;align-items:center;gap:6px;font:600 10px/1 var(--mono);
   letter-spacing:.11em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
 .ttag::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--tone,var(--muted))}
 .t-game{--tone:var(--green)}
@@ -404,7 +409,7 @@ tr:hover .mini.submit,tr:hover .mini.revert,.mini.submit:focus-visible,.mini.rev
 /* footer */
 .foot{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
   margin-top:34px;padding-top:18px;border-top:1px solid var(--line);
-  font:500 9.5px/1.6 var(--mono);letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
+  font:500 10px/1.6 var(--mono);letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
 
 /* ---------------------------------------------------------------- toast */
 .toast{position:fixed;right:22px;bottom:22px;z-index:120;display:flex;flex-direction:column;gap:8px;
@@ -438,12 +443,12 @@ tr:hover .mini.submit,tr:hover .mini.revert,.mini.submit:focus-visible,.mini.rev
 .sheet .ruled{height:1px;background:var(--line);margin:18px 0}
 .sheet-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:22px}
 .btn{height:32px;padding:0 14px;border:1px solid var(--line-2);border-radius:6px;
-  background:var(--wash-1);color:var(--text-2);font-size:12px;font-weight:520;cursor:pointer;
+  background:var(--wash-1);color:var(--text-2);font-size:12px;font-weight:500;cursor:pointer;
   transition:color .16s,border-color .16s,background .16s}
 .btn:hover{color:var(--text);border-color:var(--line-2);background:var(--wash-2)}
-.btn.primary{background:linear-gradient(180deg,var(--primary-1),var(--primary-2));border-color:var(--primary-border);color:var(--on-accent);font-weight:650}
+.btn.primary{background:linear-gradient(180deg,var(--primary-1),var(--primary-2));border-color:var(--primary-border);color:var(--on-accent);font-weight:700}
 .btn.primary:hover{background:linear-gradient(180deg,var(--primary-1-hover),var(--primary-2-hover));border-color:var(--primary-border-hover);color:var(--on-accent)}
-.btn.danger{background:linear-gradient(180deg,var(--danger-1),var(--danger-2));border-color:var(--danger-border);color:var(--on-danger);font-weight:650}
+.btn.danger{background:linear-gradient(180deg,var(--danger-1),var(--danger-2));border-color:var(--danger-border);color:var(--on-danger);font-weight:700}
 .btn.danger:hover{background:linear-gradient(180deg,var(--danger-1-hover),var(--danger-2-hover));border-color:var(--danger-border-hover)}
 .btn:disabled{opacity:.35;cursor:not-allowed}
 .chk{display:flex;align-items:flex-start;gap:9px;padding:9px 0;font-size:12.5px;color:var(--text-2);cursor:pointer}
