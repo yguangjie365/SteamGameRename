@@ -1110,7 +1110,12 @@ function adoptRow(id){
   markDirty();
   render();
   flashSummary();
-  toast('已采纳「' + d.desired_name + '」，请保存台账');
+  // 提交即持久化：审批结论立刻写入台账（renamer.db），
+  // Appinfo 被删除或被 Steam 覆盖后可随时按台账恢复。
+  save(true).then(ok => toast(
+    ok ? '已采纳并保存「' + d.desired_name + '」'
+       : '已采纳「' + d.desired_name + '」，保存失败，请点「保存台账」重试',
+    ok ? 'ok' : 'err'));
 }
 function submitCustom(id){
   const d = find(id);
@@ -1128,7 +1133,10 @@ function submitCustom(id){
   markDirty();
   render();
   flashSummary();
-  toast('已提交自定义名称，请保存台账');
+  save(true).then(ok => toast(
+    ok ? '已保存自定义名称「' + v + '」'
+       : '已提交自定义名称「' + v + '」，保存失败，请点「保存台账」重试',
+    ok ? 'ok' : 'err'));
 }
 function revertRow(id){
   const d = find(id);
@@ -1142,7 +1150,10 @@ function revertRow(id){
   d.status = unapprovedStatus(d);
   markDirty();
   render();
-  toast('已清除自定义名称并取消批准');
+  save(true).then(ok => toast(
+    ok ? '已清除自定义名称并取消批准（已保存）'
+       : '已清除自定义名称并取消批准，保存失败，请点「保存台账」重试',
+    ok ? 'ok' : 'err'));
 }
 function approveVisible(on){
   let n = 0, skipped = 0;
@@ -1169,7 +1180,15 @@ function approveVisible(on){
   if (n) markDirty();
   render();
   flashSummary();
-  toast((on ? '采纳建议' : '取消批准') + '了 ' + n + ' 条' + (skipped ? '，跳过 ' + skipped + ' 条' : ''));
+  const summary = (on ? '采纳建议' : '取消批准') + '了 ' + n + ' 条' + (skipped ? '，跳过 ' + skipped + ' 条' : '');
+  if (n) {
+    save(true).then(ok => toast(
+      ok ? summary + '，已保存台账'
+         : summary + '；保存失败，请点「保存台账」重试',
+      ok ? 'ok' : 'err'));
+  } else {
+    toast(summary);
+  }
 }
 function setStatus(v){
   status = v;
@@ -1253,7 +1272,7 @@ async function load(silent){
   clearDirty();
   if (!silent) toast('已载入 ' + rows.length + ' 条记录');
 }
-async function save(){
+async function save(silent){
   let r, j;
   try {
     r = await fetch('/api/save', {
@@ -1263,8 +1282,12 @@ async function save(){
     j = await readJson(r);
   } catch (e) { toast('保存失败：' + e, 'err'); return false; }
   if (!j) return false;
-  toast(j.message || (r.ok ? '已保存' : '保存失败'), r.ok ? 'ok' : 'err');
-  if (r.ok) clearDirty();
+  if (r.ok) {
+    clearDirty();
+    if (!silent) toast(j.message || '已保存');
+  } else if (!silent) {
+    toast(j.error || '保存失败', 'err');
+  }
   return r.ok;
 }
 
