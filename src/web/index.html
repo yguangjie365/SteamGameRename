@@ -803,8 +803,10 @@ const SOURCE_LABEL = {user_override:'手动编辑', shared_csv:'共享词库', l
   local_sc_schinese:'Steam 简中备选', common_name:'原名即中文', community:'社区词库', store_api:'Steam 商店'};
 const SPACING_HINT = '汉字与数字紧邻，建议加一个半角空格（如「合金弹头 3」）；仅提示，不自动修改';
 const CJK_DIGIT = /[\u3400-\u9fff\uf900-\ufaff][0-9]|[0-9][\u3400-\u9fff\uf900-\ufaff]/;
-const statusTabs = [['', '全部'], ['applied', '已生效'], ['pending', '待写入'], ['approved', '已批准'],
-  ['suggested', '待采纳'], ['no_zh', '无中文名'], ['unchanged', '无需改动'], ['unsupported', '不支持']];
+// 状态筛选只保留统计卡没有的两个细分（批准之中"已落盘/未落盘"）；
+// 其余各项与顶部统计卡点击完全重复，不在此重复展示。
+// 清除筛选点统计卡的「全部条目」。
+const statusTabs = [['applied', '已生效'], ['pending', '待写入']];
 
 let rows = [], view = [], page = 0, size = 100, sortKey = '', sortAsc = true;
 let status = '', dirty = false, hasRendered = false, searchedId = '';
