@@ -1976,6 +1976,28 @@ class ShardCacheTests(unittest.TestCase):
 
 
 class SqliteStorageTests(unittest.TestCase):
+    def test_import_appids_baseline_never_overwrites(self):
+        """import-applist 只补缺失：已有「最初英文名」优先于外部列表的当前名。"""
+        import db as dbmod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = dbmod.connect(Path(tmp) / "renamer.db")
+            try:
+                dbmod.write_original_names(conn, {570: "Half-Life 2 最初名"}, "baseline")
+                inserted = dbmod.import_appids_baseline(
+                    conn, {570: "Half-Life 2 当前名", 999: "New Game"}, scope={570, 999}
+                )
+                self.assertEqual(inserted, 1, "已有条目不计入新增")
+                names = dbmod.read_original_names(conn, "baseline")
+                self.assertEqual(names[570], "Half-Life 2 最初名", "最初名不得被当前名覆盖")
+                self.assertEqual(names[999], "New Game")
+                # scope 限制：范围外的 AppID 不导入
+                again = dbmod.import_appids_baseline(conn, {777: "范围外"}, scope={1})
+                self.assertEqual(again, 0)
+                self.assertNotIn(777, dbmod.read_original_names(conn, "baseline"))
+            finally:
+                conn.close()
+
     """SQLite is authoritative; JSON is migration input and explicit export."""
 
     def setUp(self):

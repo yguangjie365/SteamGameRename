@@ -343,6 +343,35 @@ def read_original_names(conn: sqlite3.Connection, source: str | None = None) -> 
     return {row["appid"]: row["original_name"] for row in conn.execute(sql, args)}
 
 
+def import_appids_baseline(
+    conn: sqlite3.Connection, names: dict[int, str], scope: set[int] | None = None
+) -> int:
+    """Merge AppID -> English name rows into the baseline, keeping existing rows.
+
+    只补缺失，绝不覆盖：已有条目的「最初英文名」优先于外部列表的「当前名」
+    （改名过的游戏外部列表携带的是新名，写入会污染对照语义，§12.4 红线）。
+    scope 传入时只导入该集合内的 AppID（默认 None = 全量）。
+    """
+    rows = [
+        (int(appid), name.strip(), "baseline")
+        for appid, name in names.items()
+        if str(appid).isdigit() and str(name).strip()
+        and (scope is None or int(appid) in scope)
+    ]
+    if not rows:
+        return 0
+    with conn:
+        inserted = 0
+        for row in rows:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO original_names(appid, original_name, source) "
+                "VALUES(?,?,?)",
+                row,
+            )
+            inserted += cursor.rowcount
+    return inserted
+
+
 def write_shared_names(conn: sqlite3.Connection, shared) -> None:
     with conn:
         conn.execute("DELETE FROM shared_names")

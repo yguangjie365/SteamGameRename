@@ -11,6 +11,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+import db as dbmod
 from steam_locator import detect_steam_dir, load_settings
 
 from backup import (
@@ -396,6 +397,74 @@ def update_community(ctx: typer.Context) -> None:
     count, source = update_community_names(config_dir / "community_names.json")
     via = "直连" if source.startswith("https://raw.githubusercontent.com") else "国内镜像"
     console.print(f"已更新社区词库，共 {count} 条（经{via}：{source}）")
+
+
+@app.command("import-applist")
+def import_applist(
+    ctx: typer.Context,
+    path: str = typer.Argument(..., help="steamappidlist 的 games_appid.json 路径"),
+    all_apps: bool = typer.Option(
+        False, "--all", help="导入全部 AppID（默认只导入本机分片与台账中出现的）"
+    ),
+) -> None:
+    """从全量 AppID 列表补充英文原名基线（只补缺失，不覆盖已有条目）。
+
+    数据源如 github.com/steamsync/steamappidlist 的 data/games_appid.json
+    （Steam 官方 GetAppList 下线后的社区替代源）。替代 §12.4 移除的
+    自动更新途径：为基线未覆盖的游戏（特别是新装的已汉化游戏）提供
+    英文原名对照。
+    """
+    source = Path(path)
+    if not source.is_file():
+        raise typer.BadParameter(f"找不到输入文件：{source}")
+    try:
+        raw = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise typer.BadParameter(f"读取或解析失败：{exc}") from exc
+    # 兼容两种形态：[{appid, name, ...}] 数组 与 {appid: name} 映射
+    if isinstance(raw, dict):
+        records = {str(k): str(v) for k, v in raw.items()
+                   if isinstance(v, str) and str(k).isdigit()}
+    elif isinstance(raw, list):
+        records = {
+            str(item["appid"]): str(item["name"])
+            for item in raw
+            if isinstance(item, dict) and str(item.get("appid", "")).isdigit()
+            and isinstance(item.get("name"), str)
+        }
+    else:
+        raise typer.BadParameter("JSON 顶层必须是数组或对象")
+    if not records:
+        raise typer.BadParameter("没有可用的 AppID 条目")
+
+    appinfo, config_dir, _ = _context(ctx)
+    scope: set[int] | None = None
+    if not all_apps:
+        scope = set()
+        from mapping import scan_shards  # 复用增量缓存
+        for shard, entry in scan_shards(appinfo):
+            scope.add(entry.appid)
+        conn = dbmod.connect(dbmod.db_path(Path(config_dir)))
+        try:
+            scope.update(
+                int(row["appid"]) for row in conn.execute("SELECT appid FROM ledger")
+            )
+        finally:
+            conn.close()
+        console.print(f"本机范围：{len(scope)} 个 AppID（--all 可导入全量）")
+
+    conn = dbmod.connect(dbmod.db_path(Path(config_dir)))
+    try:
+        inserted = dbmod.import_appids_baseline(conn, records, scope)
+        total = conn.execute(
+            "SELECT COUNT(*) FROM original_names WHERE source='baseline'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    console.print(
+        f"已导入 {inserted} 条新条目（已有条目保持不变）；"
+        f"基线现共 {total} 条"
+    )
 
 
 @app.command("export-ledger")
