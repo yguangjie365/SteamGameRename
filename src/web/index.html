@@ -976,7 +976,7 @@ function rowHtml(d, index){
       '<button class="adopt' + (adopted ? ' on' : '') + '" type="button"' + (blocked || !d.base_name ? ' disabled' : '') +
       ' onclick="adoptRow(' + id + ')">' + (adopted ? '已采纳' : '采纳') + '</button></div></td>' +
     '<td><div class="cell-custom"><input class="ninput" value="' + esc(d.custom_name) + '"' +
-      ' placeholder="' + (blocked ? '该条目无名称字段' : '输入自定义名称') + '"' +
+      ' placeholder="' + (blocked ? '该条目无名称字段' : '') + '"' +
       ' aria-label="AppID ' + id + ' 自定义名称"' +
       ' title="' + esc(blocked ? (d.note || '该条目在 Steam 数据中没有名称字段') : '输入后点击提交或按 Enter') + '"' +
       (blocked ? ' disabled' : ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();submitCustom(' + id + ')}"') + '>' +
