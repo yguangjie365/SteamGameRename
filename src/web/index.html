@@ -487,11 +487,14 @@ h1,h2{text-wrap:balance}
   background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:600;
   text-decoration:none;box-shadow:var(--shadow-md);transition:top .18s var(--ease)}
 .skip:focus{top:12px}
-/* 输入框用底部描边表达焦点，避免 2px 外框溢出单元格；按钮/下拉保留键盘焦点环 */
+/* 输入框与下拉都用底部描边表达焦点（.sel:focus / .sheet select:focus 已有蓝线），
+   避免点击时弹出 2px 蓝色外框；键盘 Tab 时下拉以加粗底线的形式保持醒目；
+   按钮仍保留全局键盘焦点环 */
 .search input:focus-visible,
-.ninput:focus-visible{outline:none}
+.ninput:focus-visible,
 .sel:focus-visible,
-.sheet select:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.sheet select:focus-visible{outline:none}
+.sel:focus-visible{border-bottom-color:var(--accent);box-shadow:0 1px 0 var(--accent)}
 .sheet{overflow-wrap:anywhere}
 .cell-custom:focus-within .mini.submit,
 .cell-custom:focus-within .mini.revert.show{opacity:1}
