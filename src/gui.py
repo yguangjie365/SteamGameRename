@@ -340,11 +340,15 @@ def make_handler(
                 def _update_worker() -> None:
                     with task_lock:
                         task_state["message"] = "正在下载社区词库…"
-                    count = update_community_names(
+                    count, source = update_community_names(
                         config_dir / "community_names.json"
                     )
+                    via = "直连" if source.startswith(
+                        "https://raw.githubusercontent.com") else "国内镜像"
                     with task_lock:
-                        task_state.update(message=f"完成，共 {count} 条", done=count)
+                        task_state.update(
+                            message=f"完成，共 {count} 条（经{via}）", done=count,
+                        )
                     # 词库缓存已变化，让 /api/plan 的签名失效
                     with _plan_lock:
                         _plan_cache.clear()

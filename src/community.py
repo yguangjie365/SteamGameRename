@@ -90,36 +90,80 @@ COMMUNITY_NAMES_URL = (
     "data/translations.zh-CN.json"
 )
 
+# 国内直连 raw.githubusercontent.com 常年超时；直连失败后依次尝试公共加速
+# 镜像。镜像站可用性随时间变化，可用环境变量覆盖（逗号分隔，{url} 占位；
+# 不含占位符则视为完整 URL，如 jsDelivr 形式）。
+_COMMUNITY_MIRROR_TEMPLATES = (
+    "https://ghfast.top/{url}",
+    "https://gh.llkk.cc/{url}",
+    "https://ghproxy.net/{url}",
+    "https://cdn.jsdelivr.net/gh/mangataw/SteamGameName@main/data/translations.zh-CN.json",
+)
+
+
+def _candidate_urls(url: str) -> list[str]:
+    """直连优先，仅默认 GitHub 源启用镜像回退（显式自定义 URL 不回退）。"""
+    if url != COMMUNITY_NAMES_URL:
+        return [url]
+    custom = os.environ.get("STEAM_CN_GH_MIRRORS", "").strip()
+    templates = (
+        tuple(t.strip() for t in custom.split(",") if t.strip())
+        or _COMMUNITY_MIRROR_TEMPLATES
+    )
+    urls = [url]
+    for template in templates:
+        urls.append(template.format(url=url) if "{url}" in template else template)
+    return urls
+
 
 def update_community_names(
     dest: str | Path, url: str = COMMUNITY_NAMES_URL
-) -> int:
-    """Download the community dictionary, validate it, and write atomically."""
-    try:
-        response = httpx.get(
-            url, timeout=30, follow_redirects=True,
-            headers={"User-Agent": "steam-cn-renamer/0.2 (+local tool)"},
+) -> tuple[int, str]:
+    """Download the community dictionary (GitHub direct, then CN mirrors).
+
+    Returns (entry_count, source_url). 内容校验失败（非法 JSON / schema
+    不符 / 空词库）与连接失败一样视为该源失败，换下一个候选继续。
+    """
+    errors: list[str] = []
+    payload: dict | None = None
+    fresh: dict[int, str] | None = None
+    used = ""
+    for candidate in _candidate_urls(url):
+        try:
+            response = httpx.get(
+                candidate, timeout=15, follow_redirects=True,
+                headers={"User-Agent": "steam-cn-renamer/0.2 (+local tool)"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            errors.append(f"{candidate} → {type(exc).__name__}")
+            continue
+        version = (
+            payload.get("schemaVersion", payload.get("schema_version"))
+            if isinstance(payload, dict) else None
         )
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise ValueError(f"无法连接社区词库源（{type(exc).__name__}）：{url}") from exc
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise ValueError("社区词库源返回的不是合法 JSON") from exc
-    version = payload.get("schemaVersion", payload.get("schema_version")) if isinstance(payload, dict) else None
-    if not isinstance(payload, dict) or version != 1:
-        raise ValueError(f"社区词库格式不受支持（schema 版本 {version!r}）")
-    games = payload.get("games")
-    if not isinstance(games, dict) or not games:
-        raise ValueError("社区词库为空或结构错误")
-    fresh = {
-        int(key): value.strip()
-        for key, value in games.items()
-        if key.isdigit() and isinstance(value, str) and value.strip()
-    }
-    if not fresh:
-        raise ValueError("社区词库没有可用的中文名")
+        games = payload.get("games") if isinstance(payload, dict) else None
+        if version != 1:
+            errors.append(f"{candidate} → schema 版本 {version!r} 不受支持")
+            continue
+        if not isinstance(games, dict) or not games:
+            errors.append(f"{candidate} → 词库为空或结构错误")
+            continue
+        fresh = {
+            int(key): value.strip()
+            for key, value in games.items()
+            if key.isdigit() and isinstance(value, str) and value.strip()
+        }
+        if not fresh:
+            errors.append(f"{candidate} → 没有可用的中文名")
+            continue
+        used = candidate
+        break
+    if fresh is None:
+        raise ValueError(
+            "无法连接社区词库源（直连与镜像均失败）：\n" + "\n".join(errors)
+        )
 
     target = Path(dest)
     if os.environ.get("STEAM_CN_RENAMER_NO_DB"):
@@ -134,6 +178,6 @@ def update_community_names(
             dbmod.write_community(conn, fresh)
         finally:
             conn.close()
-    return len(fresh)
+    return len(fresh), used
 
 

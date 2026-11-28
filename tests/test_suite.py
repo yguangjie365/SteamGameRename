@@ -709,6 +709,42 @@ class RobustnessTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 update_community_names(Path(tmp) / "c.json", url="http://127.0.0.1:1/none")
 
+    def test_update_community_falls_back_to_mirror(self):
+        """直连 GitHub 超时后应尝试国内镜像，并用第一个成功源写入。"""
+        import httpx
+
+        import community as community_mod
+        from community import COMMUNITY_NAMES_URL, update_community_names
+
+        payload = {"schemaVersion": 1, "games": {"440": "军团要塞 2"}}
+        calls: list[str] = []
+
+        def fake_get(url, **kwargs):
+            calls.append(url)
+            if url.startswith("https://ghfast.top/"):
+                resp = mock.Mock()
+                resp.raise_for_status = lambda: None
+                resp.json = lambda: payload
+                return resp
+            raise httpx.ReadTimeout("simulated CN network timeout")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(community_mod.httpx, "get", side_effect=fake_get):
+                count, source = update_community_names(Path(tmp) / "c.json")
+        self.assertEqual(count, 1)
+        self.assertEqual(calls[0], COMMUNITY_NAMES_URL, "直连必须第一个尝试")
+        self.assertEqual(calls[1], "https://ghfast.top/" + COMMUNITY_NAMES_URL)
+        self.assertTrue(source.startswith("https://ghfast.top/"), source)
+        # 显式自定义 URL 不启用镜像回退（测试/高级用途的单源语义）
+        with tempfile.TemporaryDirectory() as tmp:
+            calls.clear()
+            with mock.patch.object(community_mod.httpx, "get", side_effect=fake_get):
+                with self.assertRaises(ValueError):
+                    update_community_names(
+                        Path(tmp) / "c.json", url="http://127.0.0.1:1/none"
+                    )
+        self.assertEqual(calls, ["http://127.0.0.1:1/none"], "自定义 URL 不得触发镜像回退")
+
 
 class GuiApiTests(unittest.TestCase):
     """End-to-end HTTP checks against a temp Steam copy."""
@@ -2251,7 +2287,7 @@ class SqliteStorageTests(unittest.TestCase):
                 "schemaVersion": 1, "games": {"1": "新一", "2": "新二"},
             }
             with mock.patch("community.httpx.get", return_value=response):
-                count = update_community_names(cfg / "community_names.json")
+                count, _source = update_community_names(cfg / "community_names.json")
             self.assertEqual(count, 2)
             self.assertFalse((cfg / "community_names.json").exists())
 

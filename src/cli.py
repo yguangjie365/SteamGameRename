@@ -391,10 +391,11 @@ def prune_backups_cmd(
 
 @app.command("update-community")
 def update_community(ctx: typer.Context) -> None:
-    """联网更新社区中文名词库（GitHub / SteamGameName）。"""
+    """联网更新社区中文名词库（GitHub 直连失败自动切换国内镜像）。"""
     config_dir = Path(ctx.obj["config_dir"])  # 纯联网命令，不依赖 Steam 目录
-    count = update_community_names(config_dir / "community_names.json")
-    console.print(f"已更新社区词库，共 {count} 条")
+    count, source = update_community_names(config_dir / "community_names.json")
+    via = "直连" if source.startswith("https://raw.githubusercontent.com") else "国内镜像"
+    console.print(f"已更新社区词库，共 {count} 条（经{via}：{source}）")
 
 
 @app.command("export-ledger")
