@@ -617,7 +617,7 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
       <button class="act" type="button" id="syncBtn" onclick="doSync()" aria-label="静默同步" title="只补回 Steam 更新后丢失的已批准名称">
         <svg class="i"><use href="#i-sync"/></svg><span>静默同步</span>
       </button>
-      <button class="act" type="button" onclick="openTasks()" aria-label="更新词库" title="联网更新社区词库或补全商店中文名">
+      <button class="act" type="button" onclick="openTasks()" aria-label="更新词库" title="联网更新社区词库">
         <svg class="i"><use href="#i-cloud"/></svg><span>词库</span>
       </button>
       <button class="act" type="button" id="themeBtn" onclick="toggleTheme()" aria-label="切换浅色 / 深色主题" title="切换浅色 / 深色主题">
@@ -780,10 +780,6 @@ html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *
     <div class="task-row">
       <div><b>社区词库</b><span>GitHub · 覆盖 AppID 译名</span></div>
       <button class="btn" type="button" id="updCommunityBtn" onclick="startTask('/api/update-community')">更新</button>
-    </div>
-    <div class="task-row">
-      <div><b>商店中文名</b><span>Steam Store API · 最多补全 50 条</span></div>
-      <button class="btn" type="button" id="fetchStoreBtn" onclick="startTask('/api/fetch-store')">补全</button>
     </div>
     <div class="track" id="taskTrack" hidden><i id="taskBar"></i></div>
     <p class="hint" id="taskProgress" aria-live="polite">空闲</p>
@@ -1468,7 +1464,6 @@ async function pollTask(){
   const running = !!j.running;
   const track = $('taskTrack'), bar = $('taskBar');
   $('updCommunityBtn').disabled = running;
-  $('fetchStoreBtn').disabled = running;
   if (running) {
     track.hidden = false;
     track.classList.toggle('indeterminate', !j.total);

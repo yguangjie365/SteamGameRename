@@ -18,6 +18,9 @@ from community import (  # noqa: F401  (re-exported for CLI/GUI/tests)
     load_community_names,
     update_community_names,
 )
+# 商店中文名补全（store.py / store_cache）已于 v1.0.1 移除：Steam appdetails
+# API 拒绝批量请求、name 字段不携带本地化名，且建议名来源收敛后该数据
+# 无任何消费方（见开发者说明 §30）。
 from game_names import (
     LEARNED_CSV_NAME, ORIGINAL_CSV_NAME, SharedNames, load_original_names,
     load_shared_names, merge_original_names, names_match,
@@ -26,7 +29,6 @@ from game_names import (
 from paths import asset_dir
 from pinyin import sortas_for
 from shard import AppEntry, Shard, ShardError, app_names, parse_file, target_path
-from store import fetch_store_names, load_store_cache  # noqa: F401
 from vdf import CJK, find_string, get_node, node_text, resolve, spacing_warning
 
 TYPE_LABELS = {
@@ -579,7 +581,6 @@ def plan_from_config(
             conn = dbmod.connect(db_file)
             try:
                 community = dbmod.query_community(conn, appids)
-                store = dbmod.query_store(conn, appids)
                 originals = dbmod.query_originals(conn, appids)
                 # 共享词库复用同一个连接：少一次 connect + 一次 CSV 指纹检查
                 dbmod.sync_shared_from_files(conn, baseline_shared, local_shared)
@@ -603,14 +604,13 @@ def plan_from_config(
                     )
                 except (OSError, ValueError):
                     pass
-            if community or store or originals:
+            if community or originals:
                 return build_plan(
                     appinfo_dir,
                     load_names(folder / "names.json"),
                     include_unchanged=include_unchanged,
                     include_no_zh=include_no_zh,
                     shard_names=shard_names,
-                    store_cache=store,
                     community_names=community,
                     shared=shared,
                     original_names=originals,
@@ -624,7 +624,6 @@ def plan_from_config(
         include_unchanged=include_unchanged,
         include_no_zh=include_no_zh,
         shard_names=shard_names,
-        store_cache=load_store_cache(folder / "store_cache.json"),
         community_names=load_community_names(folder / "community_names.json"),
         shared=load_shared_names(
             asset_dir("defaults") / "game_names.csv",

@@ -23,7 +23,6 @@ from backup import (
 )
 from community import update_community_names
 from paths import DEFAULT_BACKUPS, DEFAULT_CONFIG, asset_dir, ensure_config
-from store import fetch_store_names
 from version import __version__
 from mapping import (
     TARGET_HINT,
@@ -49,7 +48,7 @@ def _source_signature(appinfo: Path, config_dir: Path) -> tuple:
     paths = sorted(appinfo.glob("appinfo_*.vdf"))
     paths += [
         config_dir / name
-        for name in ("names.json", "store_cache.json",
+        for name in ("names.json",
                      "community_names.json", "community_names.csv",
                      "game_names.csv", "renamer.db", "renamer.db-wal",
                      "renamer.db-shm")
@@ -354,40 +353,6 @@ def make_handler(
                     self._json(409, {"error": "已有联网任务在运行"})
                     return
                 self._json(202, {"message": "已开始更新社区词库"})
-                return
-
-            if path == "/api/fetch-store":
-                body = self._read_json() or {}
-                limit = body.get("limit", 50)
-                if not isinstance(limit, int) or not (1 <= limit <= 500):
-                    self._json(400, {"error": "limit 必须在 1-500 之间"})
-                    return
-                def _fetch_worker() -> None:
-                    from shard import app_names
-                    from mapping import scan_shards
-                    needs: list[int] = []
-                    for shard, entry in scan_shards(appinfo):
-                        _, localized = app_names(shard, entry)
-                        if not localized.get("schinese") and not localized.get("sc_schinese"):
-                            needs.append(entry.appid)
-                        if len(needs) >= limit:
-                            break
-                    with task_lock:
-                        task_state.update(total=len(needs), message=f"准备抓取 {len(needs)} 个…")
-                    found = fetch_store_names(
-                        needs, config_dir / "store_cache.json"
-                    )
-                    with task_lock:
-                        task_state.update(
-                            done=len(found), message=f"从商店补全 {len(found)} 个中文名"
-                        )
-                    with _plan_lock:
-                        _plan_cache.clear()
-
-                if not _start_task("fetch-store", _fetch_worker):
-                    self._json(409, {"error": "已有联网任务在运行"})
-                    return
-                self._json(202, {"message": "已开始补全商店中文名"})
                 return
 
             if path == "/api/sync":

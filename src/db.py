@@ -258,6 +258,9 @@ def read_ledger(conn: sqlite3.Connection) -> dict:
     }
 
 
+# store_cache 的读写函数已随商店补全功能移除（§30）；表定义保留，
+# 存量库中的历史数据不再被读取，也无迁移必要。
+
 # ---------------------------------------------------------------- dictionaries
 
 def write_community(conn: sqlite3.Connection, names: dict[int, str]) -> None:
@@ -273,39 +276,6 @@ def read_community(conn: sqlite3.Connection) -> dict[int, str]:
     return {
         row["appid"]: row["name"]
         for row in conn.execute("SELECT appid, name FROM community")
-    }
-
-
-def write_store_cache(
-    conn: sqlite3.Connection, cache: dict, raw: dict | None = None
-) -> None:
-    raw = raw or {}
-    with conn:
-        conn.execute("DELETE FROM store_cache")
-        rows = []
-        for appid, name in cache.items():
-            stamp = ""
-            item = raw.get(str(appid)) or raw.get(appid) or {}
-            if isinstance(item, dict):
-                stamp = str(item.get("fetched_at") or "")
-            rows.append((int(appid), str(name), stamp))
-        conn.executemany(
-            "INSERT INTO store_cache(appid, name, fetched_at) VALUES(?,?,?)", rows
-        )
-
-
-def read_store_cache(conn: sqlite3.Connection) -> dict[int, str]:
-    return {
-        row["appid"]: row["name"]
-        for row in conn.execute("SELECT appid, name FROM store_cache")
-    }
-
-
-def read_store_raw(conn: sqlite3.Connection) -> dict[str, dict]:
-    """Original {appid: {name, fetched_at}} shape, for rewriting store_cache.json."""
-    return {
-        str(row["appid"]): {"name": row["name"], "fetched_at": row["fetched_at"]}
-        for row in conn.execute("SELECT appid, name, fetched_at FROM store_cache")
     }
 
 
@@ -343,14 +313,6 @@ def _query_in(
 def query_community(conn: sqlite3.Connection, appids) -> dict[int, str]:
     rows = _query_in(
         conn, "SELECT appid, name FROM community WHERE appid IN ({placeholders})",
-        appids, ("name",),
-    )
-    return {appid: item["name"] for appid, item in rows.items()}
-
-
-def query_store(conn: sqlite3.Connection, appids) -> dict[int, str]:
-    rows = _query_in(
-        conn, "SELECT appid, name FROM store_cache WHERE appid IN ({placeholders})",
         appids, ("name",),
     )
     return {appid: item["name"] for appid, item in rows.items()}
@@ -559,21 +521,6 @@ def migrate_from_files(
     stats["ledger"] = len(read_ledger(conn).get("entries") or {})
     _migrate_community_source(conn, config_dir)
     stats["community"] = len(read_community(conn))
-
-    store_path = config_dir / "store_cache.json"
-    if store_path.exists():
-        raw = json.loads(store_path.read_text(encoding="utf-8"))
-        if isinstance(raw, dict):
-            flat = {}
-            for appid, value in raw.items():
-                if not str(appid).isdigit():
-                    continue
-                name = value.get("name") if isinstance(value, dict) else value
-                if name:
-                    flat[int(appid)] = str(name)
-            if flat:
-                write_store_cache(conn, flat, raw)
-                stats["store_cache"] = len(flat)
 
     if defaults_dir is not None:
         baseline = defaults_dir / "original_names.csv"

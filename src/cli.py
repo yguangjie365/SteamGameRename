@@ -28,7 +28,6 @@ from game_names import check_originals, load_shared_names, write_shared_names_cs
 from mapping import (
     approved_changes,
     export_names_json,
-    fetch_store_names,
     learn_original_names,
     load_names,
     pending_changes,
@@ -388,22 +387,6 @@ def prune_backups_cmd(
         console.print(f"无需清理（保留 {keep} 份即可）")
         return
     console.print(f"已删除 {len(removed)} 份旧备份: {', '.join(removed)}")
-
-
-@app.command()
-def fetch(
-    ctx: typer.Context,
-    limit: int = typer.Option(50, "--limit", help="最多补全数量"),
-) -> None:
-    """从 Steam 商店补全中文名到缓存。"""
-    appinfo, config_dir, _ = _context(ctx)
-    needs: list[int] = []
-    for shard, entry in scan_shards(appinfo):
-        _, localized = app_names(shard, entry)
-        if not localized.get("schinese") and not localized.get("sc_schinese"):
-            needs.append(entry.appid)
-    found = fetch_store_names(needs[:limit], config_dir / "store_cache.json")
-    console.print(f"从商店获取 {len(found)} 个中文名，已写入缓存")
 
 
 @app.command("update-community")
