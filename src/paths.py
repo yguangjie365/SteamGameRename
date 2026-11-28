@@ -25,27 +25,23 @@ DEFAULTS_DIR = asset_dir("defaults")
 
 
 def default_config_dir() -> Path:
-    """Project config when running from source, otherwise a per-user folder."""
+    """程序目录下的 config/；仅显式环境变量可覆盖。
+
+    配置始终跟随程序目录：首次运行时目录不存在也返回该路径，由
+    ensure_config 创建。绝不回退到 %APPDATA%，避免"台账消失"或数据分叉。
+    """
     env = os.environ.get("STEAM_CN_CONFIG")
     if env:
         return Path(env)
-    project = PROJECT_ROOT / "config"
-    if project.is_dir():
-        return project
-    base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
-    root = Path(base) if base else Path.home() / ".config"
-    return root / "steam-cn-renamer"
+    return PROJECT_ROOT / "config"
 
 
 def default_backup_root() -> Path:
+    """程序目录下的 backups/；仅显式环境变量可覆盖。"""
     env = os.environ.get("STEAM_CN_BACKUPS")
     if env:
         return Path(env)
-    if (PROJECT_ROOT / "config").is_dir():
-        return PROJECT_ROOT / "backups"
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
-    root = Path(base) if base else Path.home() / ".cache"
-    return root / "steam-cn-renamer" / "backups"
+    return PROJECT_ROOT / "backups"
 
 
 def ensure_config(config_dir: str | Path) -> Path:

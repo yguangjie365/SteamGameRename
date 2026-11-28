@@ -13,15 +13,9 @@
     ],
     "create_missing_localized": false,
     "write_sortas_pinyin": false,
-    "mapping_priority": [
-      "user_override",
-      "local_schinese",
-      "local_sc_schinese",
-      "common_name",
-      "store_api",
-      "community",
-      "shared_csv"
-    ]
+  "mapping_priority": [
+    "community"
+  ]
   },
   "summary": {},
   "entries": {}

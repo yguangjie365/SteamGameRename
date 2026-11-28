@@ -2,10 +2,9 @@
   "total": 5,
   "status": {
     "approved": 2,
-    "no_zh": 2,
-    "suggested": 1
+    "no_zh": 3
   },
   "approved": 2,
   "applied": 0,
-  "digest": "sha256:0cc6bc728c07d037a3e2fad87f0e6b71344467c60d0725cdc6a42723a3aac716"
+  "digest": "sha256:f87f92123c09c3f9cd5352e50a6b3e4f4d5aeb9077b0d510022f9f990d3881df"
 }

@@ -97,7 +97,13 @@ def connect(path: str | Path) -> sqlite3.Connection:
             "检测到迁移备份，但 renamer.db 不存在或为空；为避免重新导入过期 JSON，"
             "请从 migration-backups 恢复数据库，或确认后手工移走旧迁移备份"
         )
-    conn = sqlite3.connect(str(target), timeout=10)
+    try:
+        conn = sqlite3.connect(str(target), timeout=10)
+    except sqlite3.OperationalError as exc:
+        raise ValueError(
+            f"无法打开数据库 {target}：{exc}。"
+            "请确认配置目录存在且可写；若数据库丢失，请从 migration-backups 恢复。"
+        ) from exc
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=FULL")

@@ -181,23 +181,26 @@ class HardeningTests(unittest.TestCase):
             self.assertEqual(loaded[20], "保留")
             self.assertEqual(loaded[440], "军团要塞 2")
 
-    def test_store_cache_priority(self):
+    def test_store_cache_is_not_a_suggestion_source(self):
+        """当前规则：商店 API 不再提供建议名，只有社区词库可以。"""
         names = {
             "schema_version": 1,
             "defaults": {
                 "primary_target": "common.name",
                 "sync_existing_localized": [],
+                # 旧配置故意写成 store_api 优先，验证新规则会忽略它
                 "mapping_priority": ["local_schinese", "store_api"],
             },
             "entries": {},
         }
         plan = build_plan(
             FIXTURES, names,
-            include_no_zh=False, store_cache={443510: "测试中文名"},
+            include_no_zh=True, store_cache={443510: "测试中文名"},
         )
         item = next(p for p in plan if p.appid == 443510)
-        self.assertEqual(item.desired_name, "测试中文名")
-        self.assertEqual(item.source, "store_api")
+        self.assertEqual(item.base_name, "")
+        self.assertEqual(item.status, "no_zh")
+        self.assertNotIn("store_api", (item.source,))
 
     def test_gui_rejects_foreign_host(self):
         import http.client
@@ -354,31 +357,75 @@ class ClassificationTests(unittest.TestCase):
 
 
 class NameSourceTests(unittest.TestCase):
-    def test_chinese_common_name_is_a_source(self):
-        from mapping import resolve_base
+    """当前规则：建议名只有社区词库一个来源，其余参数一律不参与。"""
 
-        self.assertEqual(resolve_base("秦殇", {}, ["common_name"]), ("秦殇", "common_name"))
-
-    def test_chinese_name_is_fallback_even_without_priority_entry(self):
+    def test_only_community_dictionary_produces_a_suggestion(self):
         from mapping import resolve_base
 
         self.assertEqual(
-            resolve_base("秦殇", {}, ["local_schinese", "community"]),
-            ("秦殇", "common_name"),
+            resolve_base(
+                "Sekiro", {"schinese": "只狼：影逝二度 年度版"},
+                ["local_schinese", "store_api", "community"],
+                community_names={814380: "社区译名"},
+                store_cache={814380: "商店名"},
+                appid=814380,
+                shared_names={814380: "共享 CSV 名"},
+            ),
+            ("社区译名", "community"),
         )
 
-    def test_english_name_stays_untranslated(self):
+    def test_chinese_original_name_is_not_a_source(self):
         from mapping import resolve_base
 
-        self.assertEqual(resolve_base("Dead Cells", {}, ["common_name"]), ("", ""))
+        self.assertEqual(resolve_base("秦殇", {}, ["common_name"]), ("", ""))
 
-    def test_localized_wins_over_common_name(self):
+    def test_official_localization_is_not_a_source(self):
         from mapping import resolve_base
 
         self.assertEqual(
-            resolve_base("秦殇", {"schinese": "秦殇：复刻"}, ["local_schinese", "common_name"]),
-            ("秦殇：复刻", "local_schinese"),
+            resolve_base(
+                "秦殇", {"schinese": "秦殇：复刻"}, ["local_schinese"]
+            ),
+            ("", ""),
         )
+
+    def test_missing_community_entry_leaves_suggestion_empty(self):
+        from mapping import resolve_base
+
+        self.assertEqual(
+            resolve_base(
+                "Dead Cells", {"schinese": "死亡细胞"}, ["community"],
+                community_names={}, appid=588650,
+            ),
+            ("", ""),
+        )
+
+
+class ChineseOriginalNameTests(unittest.TestCase):
+    """原名即中文的条目：不进建议列（社区词库仍是唯一来源），
+    但状态必须归 unchanged 而非 no_zh——文件里已是中文，谈不上"无中文名"。"""
+
+    def test_chinese_original_is_unchanged_without_dictionary_entry(self):
+        from mapping import build_plan
+        from vdf import CJK
+
+        names = {"schema_version": 1, "defaults": {}, "entries": {}}
+        # fixtures/APPCache/APPInfo 的 2342040 common.name 是中文「猛兽派对」
+        fixtures = ROOT / "tests" / "fixtures" / "APPCache" / "APPInfo"
+        plan = build_plan(fixtures, names, community_names={})
+        item = next(p for p in plan if p.appid == 2342040)
+        # 前提校验：fixture 原名仍是中文，否则本测试失去意义
+        self.assertTrue(CJK.search(item.original_name))
+        self.assertEqual(item.base_name, "")            # 建议列保持为空（§27）
+        self.assertEqual(item.source, "common_name")
+        self.assertEqual(item.status, "unchanged")
+        self.assertEqual(item.desired_name, item.original_name)
+        self.assertFalse(item.approved)                 # 永不因此写入 Steam
+        self.assertTrue(item.in_file)                   # 文件里已是该名
+        self.assertFalse(item.applied)
+        # 对照：英文原名且无词条仍是无中文名
+        other = next(p for p in plan if p.appid == 2752710)
+        self.assertEqual(other.status, "no_zh")
 
 
 class ConfigTests(unittest.TestCase):
@@ -496,11 +543,43 @@ class ConfigTests(unittest.TestCase):
     def test_default_paths_come_from_paths_module(self):
         import paths
 
-        # 源码运行时用项目内 config/；clone 下来还没有该目录时回退到用户目录，
-        # 两种都合法，所以不能把名字写死成 "config"。
-        self.assertIn(paths.DEFAULT_CONFIG.name, ("config", "steam-cn-renamer"))
-        self.assertTrue(paths.DEFAULT_BACKUPS.name.endswith("backups"))
+        # 所有配置与备份始终在程序目录内，首次运行就建在这里。
+        self.assertEqual(paths.DEFAULT_CONFIG.name, "config")
+        self.assertEqual(paths.DEFAULT_BACKUPS.name, "backups")
         self.assertIsInstance(paths.ensure_config(paths.DEFAULT_CONFIG), Path)
+
+    def test_paths_stay_in_program_dir_on_first_run(self):
+        """首次运行目录尚不存在、以及纯安装场景，都不得回退到用户目录。"""
+        import paths
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)  # 不创建 config/、不创建 run.py
+            with mock.patch.object(paths, "PROJECT_ROOT", root):
+                self.assertEqual(paths.default_config_dir(), root / "config")
+                self.assertEqual(paths.default_backup_root(), root / "backups")
+
+    def test_explicit_env_still_overrides_program_dir(self):
+        """高级用法：显式环境变量仍可指定配置/备份位置。"""
+        import paths
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch.dict(os.environ, {
+                "STEAM_CN_CONFIG": str(root / "cfg"),
+                "STEAM_CN_BACKUPS": str(root / "bak"),
+            }):
+                self.assertEqual(paths.default_config_dir(), root / "cfg")
+                self.assertEqual(paths.default_backup_root(), root / "bak")
+
+    def test_db_connect_reports_missing_dir_clearly(self):
+        """缺目录时给出可理解的中文错误，而不是裸的 unable to open database file。"""
+        from db import connect
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "no-such-dir" / "renamer.db"
+            with self.assertRaises(ValueError) as ctx:
+                connect(target)
+            self.assertIn("无法打开数据库", str(ctx.exception))
 
 
 class CommunityCsvTests(unittest.TestCase):
@@ -603,14 +682,16 @@ class RobustnessTests(unittest.TestCase):
         self.assertFalse(primary_ok)
         self.assertEqual(existing, [])
 
-    def test_unknown_mapping_priority_is_rejected(self):
+    def test_legacy_mapping_priority_is_ignored(self):
+        """旧配置不再影响建议名，也不应因为未知来源让计划接口 400。"""
         names = {
             "schema_version": 1,
             "defaults": {"mapping_priority": ["local_schinese", "steam_store"]},
             "entries": {},
         }
-        with self.assertRaises(ValueError):
-            build_plan(FIXTURES, names)
+        plan = build_plan(FIXTURES, names, include_no_zh=True)
+        self.assertTrue(plan)
+        self.assertFalse(any(p.source in ("local_schinese", "steam_store") for p in plan))
 
     def test_ensure_config_creates_templates(self):
         from cli import ensure_config
@@ -866,8 +947,8 @@ class SharedNamesTests(unittest.TestCase):
         self.assertTrue(names_match("911 接线员", "911接线员"))
         self.assertFalse(names_match("半衰期", "半衰期 2"))
 
-    def test_shared_csv_never_beats_official_localization(self):
-        """v0.9.0 语义：官方本地化优先，共享 CSV 不再抢占建议名。"""
+    def test_shared_csv_and_official_localization_never_fill_suggestion(self):
+        """v1.0.1 语义：只有社区词库能提供建议名。"""
         from game_names import load_shared_names
         from mapping import build_plan
         from paths import asset_dir
@@ -879,14 +960,15 @@ class SharedNamesTests(unittest.TestCase):
         plan = build_plan(
             FIXTURES, names, shared=shared
         )
-        # 2342040 官方 schinese =「猛兽派对 - 豪华版升级包」；共享 CSV 只写「猛兽派对」
-        official = next(p for p in plan if p.appid == 2342040)
-        self.assertEqual(official.source, "local_schinese")
-        self.assertEqual(official.base_name, "猛兽派对 - 豪华版升级包")
-        # 443510 官方与社区都没有 → 建议名留空
-        gap = next(p for p in plan if p.appid == 443510)
+        # 2342040 有官方 schinese、共享 CSV 也有译名，但社区词库为空 → 建议名留空
+        gap = next(p for p in plan if p.appid == 2342040)
+        self.assertEqual(gap.source, "none")
         self.assertEqual(gap.base_name, "")
         self.assertEqual(gap.status, "no_zh")
+        # 443510 同样没有社区词条
+        other = next(p for p in plan if p.appid == 443510)
+        self.assertEqual(other.base_name, "")
+        self.assertEqual(other.status, "no_zh")
 
     def test_shared_source_can_be_disabled(self):
         from game_names import load_shared_names
@@ -1036,7 +1118,7 @@ class PlanSnapshotTests(unittest.TestCase):
         self.assertEqual(read_snapshot(), actual, HINT)
         # 显式断言一遍关键口径，让失败信息更直白
         self.assertEqual(actual["total"], 5)
-        self.assertEqual(actual["status"], {"approved": 2, "suggested": 1, "no_zh": 2})
+        self.assertEqual(actual["status"], {"approved": 2, "no_zh": 3})
 
 
 class PlanApiSnapshotTests(unittest.TestCase):

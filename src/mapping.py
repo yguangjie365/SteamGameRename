@@ -41,6 +41,10 @@ KNOWN_PRIORITIES = {
     "user_override", "local_schinese", "local_sc_schinese",
     "common_name", "shared_csv", "community", "store_api",
 }
+# 历史配置里可能仍保留以上来源；当前版本起建议名固定只取社区词库，
+# 该集合仅为兼容旧配置的读取，不再决定建议名来源。唯一仍会出现在计划
+# 输出里的旧来源是 common_name：原名即中文的条目用它标记 unchanged
+# 状态（见 _plan_entry），不代表它参与建议名合成。
 
 # 只有名称字段允许写入；写进 common.icon 之类会静默破坏 appinfo 元数据
 _LANG_SUFFIX = re.compile(r"[a-z_]{2,20}")
@@ -341,38 +345,18 @@ def resolve_base(
     appid: int | None = None,
     shared_names: dict[int, str] | None = None,
 ) -> tuple[str, str]:
-    """Pick the Chinese base name and its source according to mapping_priority.
+    """Return the community-dictionary name as the only suggestion source.
 
-    `common_name` covers games whose appinfo name is already Chinese
-    (e.g. 秦殇): there is no localized field to read, but the name on screen
-    is Chinese, so it must not be reported as "no Chinese name".
+    The signature keeps the historical arguments so callers and tests do not
+    break, but 当前版本起 none of them except ``community_names``/``appid``
+    can produce a suggestion. Official localization, store API, shared CSV,
+    Chinese-looking original names and user overrides are explicitly excluded:
+    if the community dictionary has no entry, the suggestion stays empty.
     """
-    for candidate in priority:
-        if candidate == "local_schinese" and localized.get("schinese"):
-            return localized["schinese"], "local_schinese"
-        if candidate == "local_sc_schinese" and localized.get("sc_schinese"):
-            return localized["sc_schinese"], "local_sc_schinese"
-        if candidate == "common_name" and CJK.search(original or ""):
-            return original, "common_name"
-        if (
-            candidate == "shared_csv"
-            and shared_names and appid is not None and shared_names.get(appid)
-        ):
-            return shared_names[appid], "shared_csv"
-        if (
-            candidate == "community"
-            and community_names and appid is not None and community_names.get(appid)
-        ):
-            return community_names[appid], "community"
-        if (
-            candidate == "store_api"
-            and store_cache and appid is not None and store_cache.get(appid)
-        ):
-            return store_cache[appid], "store_api"
-
-    # 兜底：名字本身已是中文（配置里没写 common_name 时也不该误判）
-    if CJK.search(original or ""):
-        return original, "common_name"
+    if community_names and appid is not None:
+        name = (community_names.get(appid) or "").strip()
+        if name:
+            return name, "community"
     return "", ""
 
 
@@ -418,18 +402,16 @@ def _plan_entry(
             note=note or "该条目在 Steam 数据中没有名称字段，暂不支持改名",
         )
 
-    # 建议名始终实时按 mapping_priority 从官方本地化/商店/社区词库合成；
-    # 全部落空则留空（no_zh），不再回退台账缓存快照。
+    # 建议名只来自社区词库；官方本地化、商店 API、共享 CSV、中文原名和
+    # 用户自定义名都不参与。社区词库没有该 appid 时留空（no_zh）。
     base, source = resolve_base(
         original, localized, priority,
         community_names=community_names, store_cache=store_cache,
         appid=entry.appid, shared_names=shared_names,
     )
     if base and not CJK.search(base):
-        # Steam 本地化或兜底缓存可能是英文原文（schinese 未翻译时 Valve 回英文）
+        # 社区词库偶有非中文条目时不作为中文建议名展示
         base, source = "", ""
-    if not base or not CJK.search(base):
-        base = ""
 
     if record.get("manual_override"):
         desired = (record.get("desired_name") or "").strip()
@@ -457,17 +439,28 @@ def _plan_entry(
         if record.get("approved") and not recorded_desired:
             note = note or "台账标记为已批准但目标名为空，请重新采纳建议或输入自定义名称"
         if not base:
-            # 官方本地化与词库都没有：建议名留空，由用户自定义或保持原名
-            if not include_no_zh:
-                return None
-            return PlanEntry(
-                **common, base_name="", desired_name="",
-                source=source or "none", targets=targets, note=note,
-                status="no_zh", approved=False,
-            )
-        desired = base
-        approved = False
-        status = "unchanged" if desired == original else "suggested"
+            if CJK.search(original or ""):
+                # 原名即中文（如《不思议迷宫》《传送门》）：文件里已经是
+                # 中文名，不存在"无中文名"的问题，也无需任何写入。建议列
+                # 保持为空（社区词库仍是唯一建议来源，中文原名不进建议列），
+                # 仅把状态归为 unchanged 而非 no_zh。
+                desired = original
+                approved = False
+                status = "unchanged"
+                source = "common_name"
+            else:
+                # 官方本地化与词库都没有：建议名留空，由用户自定义或保持原名
+                if not include_no_zh:
+                    return None
+                return PlanEntry(
+                    **common, base_name="", desired_name="",
+                    source=source or "none", targets=targets, note=note,
+                    status="no_zh", approved=False,
+                )
+        else:
+            desired = base
+            approved = False
+            status = "unchanged" if desired == original else "suggested"
 
     if (
         status == "unchanged"
@@ -500,30 +493,10 @@ def build_plan(
 ) -> list[PlanEntry]:
     defaults = names.get("defaults", {})
     records = names.get("entries", {})
-    # 建议名取值语义（v0.9.0 定版）：官方优先——Steam 本地化 → 原名即中文 →
-    # 商店官方名 → 社区词库；全部落空则建议名留空（no_zh），由用户自定义。
-    priority = list(defaults.get("mapping_priority", [
-        "local_schinese", "local_sc_schinese", "common_name", "store_api",
-        "community",
-    ]))
-    # 老用户的 names.json 写死了优先级，新来源默认自动插入 common_name 之后；
-    # 显式设置 defaults.use_shared_names=false 即可关闭。
-    # 共享 CSV 是个人附加词库，排在官方与社区词库之后，不抢占建议名。
-    if shared and defaults.get("use_shared_names", True):
-        if "shared_csv" not in priority:
-            if "community" in priority:
-                anchor = priority.index("community") + 1
-            else:
-                anchor = len(priority)
-            priority.insert(anchor, "shared_csv")
-    elif shared:
-        priority = [p for p in priority if p != "shared_csv"]
-    unknown = [p for p in priority if p not in KNOWN_PRIORITIES]
-    if unknown:
-        raise ValueError(
-            f"names.json: defaults.mapping_priority 含未知来源 {unknown}，"
-            f"可用值：{sorted(KNOWN_PRIORITIES)}"
-        )
+    # 建议名取值语义（当前规则）：社区词库是唯一来源。
+    # 老配置里的 defaults.mapping_priority / use_shared_names 不再参与建议名，
+    # 避免旧配置把官方本地化、商店名或自定义名重新带回建议列。
+    priority = ["community"]
     plan: list[PlanEntry] = []
 
     if pairs is None:

@@ -473,8 +473,9 @@ h1,h2{text-wrap:balance}
   background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:600;
   text-decoration:none;box-shadow:var(--shadow-md);transition:top .18s var(--ease)}
 .skip:focus{top:12px}
+/* 输入框用底部描边表达焦点，避免 2px 外框溢出单元格；按钮/下拉保留键盘焦点环 */
 .search input:focus-visible,
-.ninput:focus-visible,
+.ninput:focus-visible{outline:none}
 .sel:focus-visible,
 .sheet select:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
 .sheet{overflow-wrap:anywhere}
@@ -815,9 +816,16 @@ function matchStatus(d, s){
   if (s === 'pending') return !!d.approved && !d.in_file && d.status !== 'unsupported';
   return d.status === s;
 }
+const CJK_CHAR = /[\u3400-\u9fff\uf900-\ufaff]/;
 function unapprovedStatus(d){
-  if (!d.base_name) return 'no_zh';
-  return d.base_name === d.original_name ? 'unchanged' : 'suggested';
+  if (d.base_name) return d.base_name === d.original_name ? 'unchanged' : 'suggested';
+  // 建议名落空：原名即中文无需改动（与后端 unchanged 对齐），其余才是无中文名
+  return CJK_CHAR.test(d.original_name || '') ? 'unchanged' : 'no_zh';
+}
+function unapprovedDesired(d){
+  if (d.base_name) return d.base_name;
+  // 原名即中文：未批准态的期望名就是原名（与后端 desired=original 对齐）
+  return CJK_CHAR.test(d.original_name || '') ? (d.original_name || '') : '';
 }
 function readJson(r){
   return r.json().catch(() => { toast('服务无响应，请查看启动器窗口是否还在运行', 'err'); return null; });
@@ -1125,7 +1133,7 @@ function submitCustom(id){
 function revertRow(id){
   const d = find(id);
   if (!d) return;
-  d.desired_name = d.base_name || '';
+  d.desired_name = unapprovedDesired(d);
   d.custom_name = '';
   d.manual_override = false;
   d.approved = false;
