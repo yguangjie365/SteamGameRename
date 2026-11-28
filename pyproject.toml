@@ -45,7 +45,11 @@ py-modules = [
 
 # 静态资源安装到 share/，paths.asset_dir() 会回退到这里
 [tool.setuptools.data-files]
-"share/steam-cn-renamer/web" = ["src/web/index.html"]
+"share/steam-cn-renamer/web" = [
+  "src/web/index.html",
+  "src/web/fonts/inter-var.woff2",
+  "src/web/fonts/jetbrainsmono-var.woff2",
+]
 "share/steam-cn-renamer/defaults" = ["src/defaults/names.json", "src/defaults/game_names.csv", "src/defaults/original_names.csv"]
 
 [tool.pytest.ini_options]

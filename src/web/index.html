@@ -15,6 +15,13 @@ try{
 }catch(e){}
 </script>
 <style>
+/* 内嵌可变字体（latin 子集，随程序分发，无 CDN 依赖；font-display:swap
+   保证加载期间用系统字体渲染，离线运行也不受影响。中文字符不含在
+   这些子集里，自动回退到栈中的微软雅黑） */
+@font-face{font-family:'Inter';font-style:normal;font-weight:400 700;font-display:swap;
+  src:url('fonts/inter-var.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400 700;font-display:swap;
+  src:url('fonts/jetbrainsmono-var.woff2') format('woff2')}
 :root{
   color-scheme:light;
   --canvas:#f2f0ea;
@@ -74,11 +81,8 @@ try{
   --rail-h:64px;
   --stage:1480px;
   --ease:cubic-bezier(.22,.61,.36,1);
-  --font:"Segoe UI Variable Text","Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
-  /* 展示栈：Win11 的 Variable Display 为大字号优化（更紧字距、更精致笔画），
-     用于统计大数字等 ≥24px 场景；Win10 无此字体时回退 Segoe UI 静态字重 */
-  --font-display:"Segoe UI Variable Display","Segoe UI Variable Text","Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
-  --mono:"Cascadia Mono",ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
+  --font:"Inter","Segoe UI Variable Text","Segoe UI",-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  --mono:"JetBrains Mono","Cascadia Mono",ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
   /* 字重阶梯约定：400 正文 / 500 次强调 / 600 标题与徽章 / 700 主按钮与品牌。
      只用这四档——微软雅黑等静态字体下 520/650 这类中间值会被不可控地舍入 */
 }
@@ -230,7 +234,7 @@ button,a,input,select{touch-action:manipulation}
 .metric + .metric{border-left:1px solid var(--line)}
 .metric:hover{background:var(--wash-1)}
 .metric .k{font-size:10.5px;color:var(--muted);letter-spacing:.06em;white-space:nowrap}
-.metric .v{font-family:var(--font-display);font-size:clamp(25px,2.4vw,35px);line-height:1;font-weight:600;letter-spacing:-.03em;
+.metric .v{font-size:clamp(25px,2.4vw,35px);line-height:1;font-weight:600;letter-spacing:-.03em;
   font-variant-numeric:tabular-nums;color:var(--tone,var(--text));transition:color .2s}
 .metric .h{font:500 10px/1.4 var(--mono);letter-spacing:.08em;color:var(--faint);white-space:nowrap}
 .metric[data-tone="green"]{--tone:var(--green-ink)}

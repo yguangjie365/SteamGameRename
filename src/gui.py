@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -162,7 +163,8 @@ def make_handler(
                     "Content-Security-Policy",
                     "default-src 'none'; script-src 'unsafe-inline'; "
                     "style-src 'unsafe-inline'; img-src 'self' data:; "
-                    "connect-src 'self'; form-action 'none'; frame-ancestors 'none'",
+                    "font-src 'self'; connect-src 'self'; "
+                    "form-action 'none'; frame-ancestors 'none'",
                 )
             self.end_headers()
             self.wfile.write(body)
@@ -205,6 +207,14 @@ def make_handler(
             path = urlparse(self.path).path
             if path == "/":
                 self._send(200, load_page().encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if path.startswith("/fonts/"):
+                # 字体资产：只放行 fonts/<slug>-var.woff2 形态，杜绝路径穿越
+                name = path.rsplit("/", 1)[-1]
+                if re.fullmatch(r"[a-z0-9]+-var\.woff2", name) and (WEB_DIR / "fonts" / name).is_file():
+                    self._send(200, (WEB_DIR / "fonts" / name).read_bytes(), "font/woff2")
+                else:
+                    self._json(404, {"error": "not found"})
                 return
             if path == "/api/status":
                 self._json(200, {
