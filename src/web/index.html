@@ -310,6 +310,9 @@ tbody tr:hover{background:var(--row-hover)}
 tbody tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 tbody tr.changed{background:var(--row-changed)}
 tbody tr.changed:hover{background:var(--row-changed-hover)}
+/* 正在编辑的行：复用 changed 色，让焦点所在行在长列表里一眼可辨 */
+tbody tr:focus-within{background:var(--row-changed)}
+tbody tr:focus-within td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 tbody tr.searched td{background:var(--amber-wash)}
 tbody tr.searched:hover td{background:var(--amber-wash-strong)}
 tbody tr.searched td:first-child{box-shadow:inset 2px 0 0 var(--amber)}
@@ -409,8 +412,10 @@ tr:hover .mini.submit,tr:hover .mini.revert,.mini.submit:focus-visible,.mini.rev
 .toast div{pointer-events:auto;padding:11px 14px;border-radius:9px;border:1px solid var(--line-2);
   background:var(--toast-bg);box-shadow:var(--shadow-md);
   font-size:12px;color:var(--text-2);animation:toast-in .24s var(--ease);
+  transition:opacity .3s var(--ease),transform .3s var(--ease);
   border-left:2px solid var(--green);backdrop-filter:blur(14px)}
 .toast div.err{border-left-color:var(--red)}
+.toast div.out{opacity:0;transform:translateY(6px);pointer-events:none}
 @keyframes toast-in{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
 
 /* ---------------------------------------------------------------- modal */
@@ -483,8 +488,22 @@ h1,h2{text-wrap:balance}
 .cell-custom:focus-within .mini.revert.show{opacity:1}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
   clip:rect(0 0 0 0);white-space:nowrap;border:0}
+/* 主题切换的短暂全局过渡：切换瞬间加类，260ms 后移除，避免常驻过渡拖慢交互 */
+html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after{
+  transition:background-color .22s var(--ease),border-color .22s var(--ease),color .22s var(--ease)!important}
 @media (hover:none){
   .mini{opacity:1}
+  /* 触屏没有 hover：热区整体放大，行内控件保持可触达 */
+  .adopt{height:34px;padding:0 12px;font-size:12px}
+  .mini{width:32px;height:32px;flex:0 0 32px}
+  .mini .i{width:15px;height:15px;flex-basis:15px}
+  .mini.submit,.mini.revert{height:30px}
+  .stab{padding:11px 14px}
+  .lnk{padding:9px 2px;font-size:12px}
+  .ninput{height:36px;font-size:13px}
+  .pbtn{height:34px}
+  .sel{height:38px}
+  .act{height:38px}
 }
 @media (prefers-reduced-motion:reduce){
   .skip{transition:none}
@@ -576,7 +595,7 @@ h1,h2{text-wrap:balance}
       <button class="act" type="button" id="saveBtn" onclick="save()" aria-label="保存台账" title="保存台账到本地 SQLite（Ctrl+S）">
         <svg class="i"><use href="#i-save"/></svg><span>保存台账</span>
       </button>
-      <button class="act solid" type="button" onclick="openApply()" aria-label="应用写入" title="确认后写入 Steam 本地缓存">
+      <button class="act solid" type="button" id="applyBtn" onclick="openApply()" aria-label="应用写入" title="确认后写入 Steam 本地缓存">
         <svg class="i"><use href="#i-write"/></svg><span>应用写入</span>
       </button>
       <button class="act" type="button" id="syncBtn" onclick="doSync()" aria-label="静默同步" title="只补回 Steam 更新后丢失的已批准名称">
@@ -835,7 +854,11 @@ function toast(msg, type){
   if (type === 'err') el.className = 'err';
   el.textContent = msg;
   $('toast').appendChild(el);
-  setTimeout(() => el.remove(), 4200);
+  setTimeout(() => {
+    el.classList.add('out');
+    el.addEventListener('transitionend', () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 500);  // transitionend 可能因 reduced-motion 不触发
+  }, 4200);
 }
 
 /* ------------------------------------------------------------ theme */
@@ -858,7 +881,10 @@ function applyTheme(theme, persist){
   }
 }
 function toggleTheme(){
+  const root = document.documentElement;
+  root.classList.add('theme-anim');
   applyTheme(currentTheme() === 'dark' ? 'light' : 'dark', true);
+  setTimeout(() => root.classList.remove('theme-anim'), 260);
 }
 
 /* ------------------------------------------------------------ stats + render */
@@ -1341,26 +1367,36 @@ function openApply(){
 function closeApply(){ closeModal('applyMask'); }
 async function doApply(){
   const auto = !!$('autoCloseSteam').checked;
+  const btn = $('applyBtn');
+  if (btn.disabled) return;  // 写入是多秒操作，防双击重复提交
   closeApply();
-  if (!await save()) return;
-  toast(auto ? '正在安全关闭 Steam 并写入…' : '正在写入…');
-  let r, j;
+  const label = btn.querySelector('span');
+  btn.disabled = true;
+  if (label) label.textContent = '写入中…';
   try {
-    r = await fetch(auto ? '/api/apply-safe' : '/api/apply', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
-    });
-    j = await readJson(r);
-  } catch (e) { toast('写入失败：' + e, 'err'); return; }
-  if (!j) return;
-  if (r.ok) {
-    const size = j.backup_size ? '（' + (j.backup_size / 1048576).toFixed(2) + ' MB）' : '';
-    let msg = j.message + '；备份: ' + j.backup + size;
-    if (auto) msg += j.restarted ? '；已重启 Steam' : '；请手动启动 Steam';
-    toast(msg);
-    await load(true);
-    loadStatus();
-  } else {
-    toast('写入失败: ' + (j.error || r.status), 'err');
+    if (!await save()) return;
+    toast(auto ? '正在安全关闭 Steam 并写入…' : '正在写入…');
+    let r, j;
+    try {
+      r = await fetch(auto ? '/api/apply-safe' : '/api/apply', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'
+      });
+      j = await readJson(r);
+    } catch (e) { toast('写入失败：' + e, 'err'); return; }
+    if (!j) return;
+    if (r.ok) {
+      const size = j.backup_size ? '（' + (j.backup_size / 1048576).toFixed(2) + ' MB）' : '';
+      let msg = j.message + '；备份: ' + j.backup + size;
+      if (auto) msg += j.restarted ? '；已重启 Steam' : '；请手动启动 Steam';
+      toast(msg);
+      await load(true);
+      loadStatus();
+    } else {
+      toast('写入失败: ' + (j.error || r.status), 'err');
+    }
+  } finally {
+    btn.disabled = false;
+    if (label) label.textContent = '应用写入';
   }
 }
 async function doSync(){
@@ -1510,7 +1546,12 @@ function bind(){
     if (!b) return;
     setStatus(b.dataset.status || '');
   });
-  $('q').addEventListener('input', () => { page = 0; render(); flashSummary(); });
+  // 搜索防抖：连续击键只在停顿 120ms 后重绘一次（100 行全量 render 每键执行太浪费）
+  let searchTimer = null;
+  $('q').addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { page = 0; render(); flashSummary(); }, 120);
+  });
   $('typeFilter').addEventListener('change', () => { page = 0; render(); });
   $('pageSize').addEventListener('change', e => {
     size = Number(e.target.value) || 100;
@@ -1529,6 +1570,7 @@ function bind(){
       page = 0;
       render();
     };
+    th.title = '点击或按 Enter 排序';
     th.addEventListener('click', sortBy);
     th.addEventListener('keydown', e => {
       if (e.key === 'Enter' || e.key === ' ') {
