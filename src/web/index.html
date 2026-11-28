@@ -99,13 +99,15 @@ try{
   --text-2:#b8c1cd;
   --muted:#98a2b1;
   --faint:#8792a2;
-  --line:rgba(255,255,255,.1);
-  --line-2:rgba(255,255,255,.18);
+  /* 深色块面对比（相对浅色整体上调）：分隔线 14%、hover 5%、
+     高亮行 11%——文字对比本已达标，这里解决的是结构与行高亮的可辨识度 */
+  --line:rgba(255,255,255,.14);
+  --line-2:rgba(255,255,255,.24);
   --accent:#8aacff;
   --accent-2:#b6ccff;
   --on-accent:#0a1220;
-  --accent-dim:rgba(138,172,255,.12);
-  --accent-wash:rgba(138,172,255,.1);
+  --accent-dim:rgba(138,172,255,.15);
+  --accent-wash:rgba(138,172,255,.13);
   --accent-line:rgba(138,172,255,.26);
   --accent-line-strong:rgba(138,172,255,.5);
   --accent-glow:rgba(138,172,255,.2);
@@ -118,8 +120,8 @@ try{
   --red:#ff8f88; --red-ink:#ffaaa4;
   --red-wash:rgba(255,143,136,.08); --red-line:rgba(255,143,136,.28);
   --violet:#bda8ff; --violet-wash:rgba(189,168,255,.09);
-  --wash-1:rgba(255,255,255,.035); --wash-2:rgba(255,255,255,.06); --wash-3:rgba(255,255,255,.09);
-  --row-hover:rgba(138,172,255,.04); --row-changed:rgba(138,172,255,.06); --row-changed-hover:rgba(138,172,255,.09);
+  --wash-1:rgba(255,255,255,.05); --wash-2:rgba(255,255,255,.08); --wash-3:rgba(255,255,255,.12);
+  --row-hover:rgba(138,172,255,.07); --row-changed:rgba(138,172,255,.11); --row-changed-hover:rgba(138,172,255,.15);
   --selection:rgba(138,172,255,.26); --selection-text:#f2f6fb;
   --page-bg:radial-gradient(1100px 620px at 8% -8%,rgba(90,130,255,.10),transparent 58%),radial-gradient(760px 480px at 94% -4%,rgba(120,220,180,.035),transparent 60%),var(--canvas);
   --grain-opacity:.02;
